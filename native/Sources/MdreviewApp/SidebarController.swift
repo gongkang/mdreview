@@ -3,10 +3,10 @@ import MdreviewCore
 
 @MainActor
 final class SidebarController {
-    let filesView = NSScrollView()
-    let outlineView = NSScrollView()
-    private let filesStack = NSStackView()
-    private let outlineStack = NSStackView()
+    let filesView: NSScrollView = SidebarScrollView()
+    let outlineView: NSScrollView = SidebarScrollView()
+    private let filesStack = SidebarStackView()
+    private let outlineStack = SidebarStackView()
     var onSelectFile: ((String) -> Void)?
     var onSelectHeading: ((String) -> Void)?
 
@@ -33,9 +33,10 @@ final class SidebarController {
         clear(filesStack)
         if nodes.isEmpty {
             filesStack.addArrangedSubview(NSTextField(labelWithString: "没有 Markdown 文件"))
-            return
+        } else {
+            addFiles(nodes, depth: 0, activePath: activePath)
         }
-        addFiles(nodes, depth: 0, activePath: activePath)
+        filesView.needsLayout = true
     }
 
     private func addFiles(_ nodes: [MarkdownNode], depth: Int, activePath: String?) {
@@ -57,15 +58,16 @@ final class SidebarController {
         clear(outlineStack)
         if items.isEmpty {
             outlineStack.addArrangedSubview(NSTextField(labelWithString: "没有大纲"))
-            return
+        } else {
+            for item in items {
+                let title = String(repeating: "  ", count: max(0, item.depth - 1)) + item.text
+                let button = NSButton(title: title, target: self, action: #selector(selectHeading(_:)))
+                button.identifier = NSUserInterfaceItemIdentifier(item.id)
+                button.bezelStyle = .texturedRounded
+                outlineStack.addArrangedSubview(button)
+            }
         }
-        for item in items {
-            let title = String(repeating: "  ", count: max(0, item.depth - 1)) + item.text
-            let button = NSButton(title: title, target: self, action: #selector(selectHeading(_:)))
-            button.identifier = NSUserInterfaceItemIdentifier(item.id)
-            button.bezelStyle = .texturedRounded
-            outlineStack.addArrangedSubview(button)
-        }
+        outlineView.needsLayout = true
     }
 
     func toggleFiles() {
@@ -91,5 +93,27 @@ final class SidebarController {
             stack.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
+    }
+}
+
+private final class SidebarStackView: NSStackView {
+    override var isFlipped: Bool {
+        true
+    }
+}
+
+private final class SidebarScrollView: NSScrollView {
+    override func layout() {
+        super.layout()
+        guard let stack = documentView as? NSStackView else { return }
+        stack.layoutSubtreeIfNeeded()
+        let fittingSize = stack.fittingSize
+        stack.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: max(contentView.bounds.width, fittingSize.width),
+            height: max(contentView.bounds.height, fittingSize.height)
+        )
+        stack.layoutSubtreeIfNeeded()
     }
 }

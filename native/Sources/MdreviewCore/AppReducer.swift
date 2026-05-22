@@ -20,6 +20,21 @@ public enum AppReducer {
         }
     }
 
+    public static func closeActiveTab(in model: inout AppModel) {
+        guard let windowIndex = activeWindowIndex(in: model),
+              let activeTabID = model.windows[windowIndex].activeTabID else { return }
+
+        model.windows[windowIndex].tabs.removeAll { $0.id == activeTabID }
+        if let nextActiveTabID = model.windows[windowIndex].tabs.last?.id {
+            model.windows[windowIndex].activeTabID = nextActiveTabID
+            model.activeWindowID = model.windows[windowIndex].id
+            return
+        }
+
+        model.windows.remove(at: windowIndex)
+        model.activeWindowID = model.windows.last?.id
+    }
+
     private static func openFile(_ url: URL, newWindow: Bool, model: inout AppModel) -> ReducerResult {
         for windowIndex in model.windows.indices {
             if let tab = model.windows[windowIndex].tabs.first(where: { $0.url.path == url.path }) {

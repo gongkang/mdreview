@@ -101,6 +101,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func synchronizeWindows() {
+        let modelWindowIDs = Set(model.windows.map(\.id))
+        for index in windows.indices.reversed() {
+            guard let id = windows[index].modelID,
+                  !modelWindowIDs.contains(id) else { continue }
+            windows[index].close()
+            windows.remove(at: index)
+        }
         while windows.count < model.windows.count {
             createWindow(activate: false)
         }
@@ -182,11 +189,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func closeTab() {
-        guard let index = activeWindowIndex(),
-              let activeTabID = model.windows[index].activeTabID else { return }
-        model.windows[index].tabs.removeAll { $0.id == activeTabID }
-        model.windows[index].activeTabID = model.windows[index].tabs.last?.id
+        AppReducer.closeActiveTab(in: &model)
         synchronizeWindows()
+        if model.windows.isEmpty {
+            NSApp.terminate(nil)
+        }
     }
 
     @objc private func toggleFiles() {

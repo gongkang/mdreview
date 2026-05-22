@@ -16,6 +16,7 @@ final class MainWindowController: NSWindowController {
     private var settings = SettingsStore.load()
     private var filesWidthConstraint: NSLayoutConstraint?
     private var outlineWidthConstraint: NSLayoutConstraint?
+    private(set) var modelID: UUID?
 
     convenience init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -80,6 +81,7 @@ final class MainWindowController: NSWindowController {
     }
 
     func apply(windowModel: WindowModel) {
+        modelID = windowModel.id
         currentWindowModel = windowModel
         currentWorkspaceRoot = windowModel.workspaceRoot
         tabBar.render(tabs: windowModel.tabs, activeTabID: windowModel.activeTabID)
@@ -109,9 +111,12 @@ final class MainWindowController: NSWindowController {
         resourceHandler.currentDocument = tab.url
         do {
             let content = try String(contentsOf: tab.url, encoding: .utf8)
+            sidebar.renderOutline(MarkdownOutline.parse(content))
             renderer.render(path: tab.url.path, name: tab.title, content: content, scrollPosition: tab.scrollPosition)
         } catch {
-            renderer.render(path: tab.url.path, name: tab.title, content: "文件不存在：\(tab.url.path)", scrollPosition: tab.scrollPosition)
+            let message = "文件不存在：\(tab.url.path)"
+            sidebar.renderOutline(MarkdownOutline.parse(message))
+            renderer.render(path: tab.url.path, name: tab.title, content: message, scrollPosition: tab.scrollPosition)
         }
     }
 

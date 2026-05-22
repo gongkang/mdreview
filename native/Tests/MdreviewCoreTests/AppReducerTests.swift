@@ -39,4 +39,27 @@ final class AppReducerTests: XCTestCase {
         _ = AppReducer.apply(.openFile(URL(fileURLWithPath: "/tmp/README.md"), newWindow: false), to: &model)
         XCTAssertEqual(model.windows[0].layoutMode, .outlineAndDocument)
     }
+
+    func testClosingLastActiveTabRemovesWindow() {
+        var model = AppModel()
+        _ = AppReducer.apply(.openFile(URL(fileURLWithPath: "/tmp/README.md"), newWindow: false), to: &model)
+
+        AppReducer.closeActiveTab(in: &model)
+
+        XCTAssertTrue(model.windows.isEmpty)
+        XCTAssertNil(model.activeWindowID)
+    }
+
+    func testClosingActiveTabKeepsWindowWhenAnotherTabRemains() {
+        var model = AppModel()
+        _ = AppReducer.apply(.openFile(URL(fileURLWithPath: "/tmp/one.md"), newWindow: false), to: &model)
+        _ = AppReducer.apply(.openFile(URL(fileURLWithPath: "/tmp/two.md"), newWindow: false), to: &model)
+
+        AppReducer.closeActiveTab(in: &model)
+
+        XCTAssertEqual(model.windows.count, 1)
+        XCTAssertEqual(model.windows[0].tabs.map(\.url.path), ["/tmp/one.md"])
+        XCTAssertEqual(model.windows[0].activeTabID, model.windows[0].tabs[0].id)
+        XCTAssertEqual(model.activeWindowID, model.windows[0].id)
+    }
 }
