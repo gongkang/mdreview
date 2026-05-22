@@ -6,7 +6,7 @@
 
 **Architecture:** Add a Swift/AppKit native app built with SwiftPM so it can run with Command Line Tools. The native app owns windows, document tabs, workspace state, file reading, resource authorization, menus, settings, and a Unix domain socket IPC server. The existing TypeScript renderer is refactored into a bridge-driven WKWebView document renderer instead of a browser shell.
 
-**Tech Stack:** Swift 6/AppKit/WebKit/Network, SwiftPM/XCTest, Node.js/TypeScript/Vite/React/Vitest, Unix domain sockets, `WKScriptMessageHandler`, `WKURLSchemeHandler`, npm build scripts.
+**Tech Stack:** Swift 6/AppKit/WebKit/Darwin POSIX sockets, SwiftPM/XCTest, Node.js/TypeScript/Vite/React/Vitest, Unix domain sockets, `WKScriptMessageHandler`, `WKURLSchemeHandler`, npm build scripts.
 
 ---
 
@@ -507,7 +507,7 @@ final class AppReducerTests: XCTestCase {
     func testDirectoryOpenReplacesWorkspaceAndClosesOldTabs() throws {
         var model = AppModel()
         _ = AppReducer.apply(.openFile(URL(fileURLWithPath: "/tmp/old.md"), newWindow: false), to: &model)
-        _ = AppReducer.apply(.openDirectory(URL(fileURLWithPath: "/tmp/docs"), defaultDocument: URL(fileURLWithPath: "/tmp/docs/README.md"), newWindow: false), to: &model)
+        _ = AppReducer.apply(.openDirectory(URL(fileURLWithPath: "/tmp/docs"), defaultDocument: URL(fileURLWithPath: "/tmp/docs/README.md"), fileTree: [], newWindow: false), to: &model)
 
         XCTAssertEqual(model.windows.count, 1)
         XCTAssertEqual(model.windows[0].workspaceRoot?.path, "/tmp/docs")
@@ -516,8 +516,8 @@ final class AppReducerTests: XCTestCase {
 
     func testNewWindowDirectoryCreatesSecondWindow() throws {
         var model = AppModel()
-        _ = AppReducer.apply(.openDirectory(URL(fileURLWithPath: "/tmp/a"), defaultDocument: URL(fileURLWithPath: "/tmp/a/README.md"), newWindow: false), to: &model)
-        _ = AppReducer.apply(.openDirectory(URL(fileURLWithPath: "/tmp/b"), defaultDocument: URL(fileURLWithPath: "/tmp/b/README.md"), newWindow: true), to: &model)
+        _ = AppReducer.apply(.openDirectory(URL(fileURLWithPath: "/tmp/a"), defaultDocument: URL(fileURLWithPath: "/tmp/a/README.md"), fileTree: [], newWindow: false), to: &model)
+        _ = AppReducer.apply(.openDirectory(URL(fileURLWithPath: "/tmp/b"), defaultDocument: URL(fileURLWithPath: "/tmp/b/README.md"), fileTree: [], newWindow: true), to: &model)
 
         XCTAssertEqual(model.windows.count, 2)
         XCTAssertEqual(model.windows[1].workspaceRoot?.path, "/tmp/b")
@@ -574,13 +574,15 @@ public struct DocumentTab: Codable, Equatable, Identifiable {
 public struct WindowModel: Codable, Equatable, Identifiable {
     public let id: UUID
     public var workspaceRoot: URL?
+    public var fileTree: [MarkdownNode]
     public var tabs: [DocumentTab]
     public var activeTabID: UUID?
     public var layoutMode: LayoutMode
 
-    public init(id: UUID = UUID(), workspaceRoot: URL? = nil, tabs: [DocumentTab] = [], activeTabID: UUID? = nil, layoutMode: LayoutMode = .outlineAndDocument) {
+    public init(id: UUID = UUID(), workspaceRoot: URL? = nil, fileTree: [MarkdownNode] = [], tabs: [DocumentTab] = [], activeTabID: UUID? = nil, layoutMode: LayoutMode = .outlineAndDocument) {
         self.id = id
         self.workspaceRoot = workspaceRoot
+        self.fileTree = fileTree
         self.tabs = tabs
         self.activeTabID = activeTabID
         self.layoutMode = layoutMode
@@ -605,7 +607,7 @@ import Foundation
 
 public enum AppCommand {
     case openFile(URL, newWindow: Bool)
-    case openDirectory(URL, defaultDocument: URL, newWindow: Bool)
+    case openDirectory(URL, defaultDocument: URL, fileTree: [MarkdownNode], newWindow: Bool)
 }
 
 public enum ReducerResult: Equatable {
@@ -618,8 +620,8 @@ public enum AppReducer {
         switch command {
         case let .openFile(url, newWindow):
             return openFile(url, newWindow: newWindow, model: &model)
-        case let .openDirectory(root, defaultDocument, newWindow):
-            return openDirectory(root, defaultDocument: defaultDocument, newWindow: newWindow, model: &model)
+        case let .openDirectory(root, defaultDocument, fileTree, newWindow):
+            return openDirectory(root, defaultDocument: defaultDocument, fileTree: fileTree, newWindow: newWindow, model: &model)
         }
     }
 
@@ -650,9 +652,9 @@ public enum AppReducer {
         return .opened
     }
 
-    private static func openDirectory(_ root: URL, defaultDocument: URL, newWindow: Bool, model: inout AppModel) -> ReducerResult {
+    private static func openDirectory(_ root: URL, defaultDocument: URL, fileTree: [MarkdownNode], newWindow: Bool, model: inout AppModel) -> ReducerResult {
         let tab = DocumentTab(url: defaultDocument)
-        let replacement = WindowModel(workspaceRoot: root, tabs: [tab], activeTabID: tab.id, layoutMode: .filesOutlineAndDocument)
+        let replacement = WindowModel(workspaceRoot: root, fileTree: fileTree, tabs: [tab], activeTabID: tab.id, layoutMode: .filesOutlineAndDocument)
 
         if newWindow || model.windows.isEmpty {
             model.windows.append(replacement)
@@ -661,7 +663,7 @@ public enum AppReducer {
         }
 
         let index = activeWindowIndex(in: model) ?? 0
-        model.windows[index] = WindowModel(id: model.windows[index].id, workspaceRoot: root, tabs: [tab], activeTabID: tab.id, layoutMode: .filesOutlineAndDocument)
+        model.windows[index] = WindowModel(id: model.windows[index].id, workspaceRoot: root, fileTree: fileTree, tabs: [tab], activeTabID: tab.id, layoutMode: .filesOutlineAndDocument)
         model.activeWindowID = model.windows[index].id
         return .opened
     }
@@ -958,7 +960,8 @@ async function waitForApp(socketPath: string, request: NativeOpenRequest) {
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
   }
-  throw lastError instanceof Error ? lastError : new Error("无法连接 mdreview App");
+  const detail = lastError instanceof Error ? lastError.message : "未知错误";
+  throw new Error(`无法连接 mdreview App，请确认已安装 App 或设置 MDREVIEW_APP_PATH：${detail}`);
 }
 
 async function main() {
@@ -1015,8 +1018,8 @@ void main();
 Create `native/Tests/MdreviewIPCTests/SocketServerTests.swift`:
 
 ```swift
+import Darwin
 import Foundation
-import Network
 import XCTest
 @testable import MdreviewCore
 @testable import MdreviewIPC
@@ -1040,25 +1043,35 @@ final class SocketServerTests: XCTestCase {
         try server.start()
         defer { server.stop() }
 
-        let expectation = expectation(description: "response received")
-        let connection = NWConnection(to: .unix(path: socketPath), using: .tcp)
-        var received = ""
+        let client = try connectUnixSocket(path: socketPath)
+        defer { close(client) }
+        let request = #"{"kind":"openFile","path":"/tmp/README.md","newWindow":false}"# + "\n"
+        request.withCString { pointer in
+            _ = Darwin.write(client, pointer, strlen(pointer))
+        }
 
-        connection.stateUpdateHandler = { state in
-            if case .ready = state {
-                let request = #"{"kind":"openFile","path":"/tmp/README.md","newWindow":false}"# + "\n"
-                connection.send(content: Data(request.utf8), completion: .contentProcessed { _ in })
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        let count = Darwin.read(client, &buffer, buffer.count)
+        XCTAssertGreaterThan(count, 0)
+        let received = String(data: Data(buffer.prefix(count)), encoding: .utf8)
+        XCTAssertEqual(received, #"{"accepted":true,"action":"opened","message":"已打开"}"# + "\n")
+    }
+
+    private func connectUnixSocket(path: String) throws -> CInt {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        XCTAssertGreaterThanOrEqual(fd, 0)
+        guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        var address = try SocketServer.makeAddress(path: path)
+        let result = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { data, _, _, _ in
-            received = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-            expectation.fulfill()
+        if result != 0 {
+            close(fd)
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
         }
-        connection.start(queue: .global())
-
-        wait(for: [expectation], timeout: 2)
-        connection.cancel()
-        XCTAssertEqual(received, #"{"accepted":true,"action":"opened","message":"已打开"}"# + "\n")
+        return fd
     }
 }
 ```
@@ -1068,8 +1081,8 @@ final class SocketServerTests: XCTestCase {
 Create `native/Sources/MdreviewIPC/SocketServer.swift`:
 
 ```swift
+import Darwin
 import Foundation
-import Network
 import MdreviewCore
 
 public enum SocketCodec {
@@ -1085,11 +1098,19 @@ public enum SocketCodec {
     }
 }
 
+public enum SocketServerError: Error {
+    case pathTooLong
+    case socketFailed(Int32)
+    case bindFailed(Int32)
+    case listenFailed(Int32)
+}
+
 public final class SocketServer {
     private let socketPath: String
     private let handler: (OpenRequest) -> OpenResponse
     private let queue = DispatchQueue(label: "mdreview.ipc.socket")
-    private var listener: NWListener?
+    private var serverFD: CInt = -1
+    private var isRunning = false
 
     public init(socketPath: String, handler: @escaping (OpenRequest) -> OpenResponse) throws {
         self.socketPath = socketPath
@@ -1100,37 +1121,90 @@ public final class SocketServer {
         if FileManager.default.fileExists(atPath: socketPath) {
             try FileManager.default.removeItem(atPath: socketPath)
         }
-        let parameters = NWParameters.tcp
-        parameters.requiredLocalEndpoint = .unix(path: socketPath)
-        let listener = try NWListener(using: parameters)
-        listener.newConnectionHandler = { [handler] connection in
-            connection.start(queue: self.queue)
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, _, _ in
-                guard let data else {
-                    connection.cancel()
-                    return
-                }
-                let response: OpenResponse
-                do {
-                    let request = try SocketCodec.decodeRequest(data)
-                    response = handler(request)
-                } catch {
-                    response = OpenResponse(accepted: false, action: .rejected, message: "无法解析打开请求")
-                }
-                let encoded = (try? SocketCodec.encode(response)) ?? Data()
-                connection.send(content: encoded, completion: .contentProcessed { _ in
-                    connection.cancel()
-                })
+
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw SocketServerError.socketFailed(errno) }
+        serverFD = fd
+
+        var address = try Self.makeAddress(path: socketPath)
+        let bindResult = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        self.listener = listener
-        listener.start(queue: queue)
+        guard bindResult == 0 else {
+            close(fd)
+            serverFD = -1
+            throw SocketServerError.bindFailed(errno)
+        }
+        chmod(socketPath, S_IRUSR | S_IWUSR)
+
+        guard listen(fd, SOMAXCONN) == 0 else {
+            close(fd)
+            serverFD = -1
+            throw SocketServerError.listenFailed(errno)
+        }
+        isRunning = true
+        queue.async { [weak self] in
+            self?.acceptLoop()
+        }
     }
 
     public func stop() {
-        listener?.cancel()
-        listener = nil
+        isRunning = false
+        if serverFD >= 0 {
+            shutdown(serverFD, SHUT_RDWR)
+            close(serverFD)
+            serverFD = -1
+        }
         try? FileManager.default.removeItem(atPath: socketPath)
+    }
+
+    public static func makeAddress(path: String) throws -> sockaddr_un {
+        var address = sockaddr_un()
+        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        address.sun_family = sa_family_t(AF_UNIX)
+        let maxPathLength = MemoryLayout.size(ofValue: address.sun_path)
+        guard path.utf8.count < maxPathLength else { throw SocketServerError.pathTooLong }
+        _ = path.withCString { source in
+            withUnsafeMutablePointer(to: &address.sun_path) { pointer in
+                pointer.withMemoryRebound(to: CChar.self, capacity: maxPathLength) { destination in
+                    strncpy(destination, source, maxPathLength - 1)
+                }
+            }
+        }
+        return address
+    }
+
+    private func acceptLoop() {
+        while isRunning {
+            let clientFD = accept(serverFD, nil, nil)
+            if clientFD < 0 {
+                if isRunning { continue }
+                return
+            }
+            handle(clientFD: clientFD)
+        }
+    }
+
+    private func handle(clientFD: CInt) {
+        defer { close(clientFD) }
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        let count = Darwin.read(clientFD, &buffer, buffer.count)
+        guard count > 0 else { return }
+        let data = Data(buffer.prefix(count))
+        let response: OpenResponse
+        do {
+            let request = try SocketCodec.decodeRequest(data)
+            response = handler(request)
+        } catch {
+            response = OpenResponse(accepted: false, action: .rejected, message: "无法解析打开请求")
+        }
+        guard let encoded = try? SocketCodec.encode(response) else { return }
+        encoded.withUnsafeBytes { rawBuffer in
+            guard let base = rawBuffer.baseAddress else { return }
+            _ = Darwin.write(clientFD, base, rawBuffer.count)
+        }
     }
 }
 ```
@@ -1166,7 +1240,6 @@ git commit -m "feat: add native app CLI handoff"
 - Create: `src/web/renderer/resources.ts`
 - Create: `src/web/renderer/RendererApp.tsx`
 - Modify: `src/web/main.tsx`
-- Modify: `src/web/App.tsx`
 - Create: `tests/web/renderer/bridge.test.ts`
 - Create: `tests/web/renderer/resources.test.ts`
 - Create: `tests/web/renderer/RendererApp.test.tsx`
@@ -1206,12 +1279,42 @@ describe("native bridge", () => {
 });
 ```
 
+Create `tests/web/renderer/RendererApp.test.tsx`:
+
+```tsx
+import { act, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { RendererApp } from "../../../src/web/renderer/RendererApp";
+
+afterEach(() => {
+  delete window.__mdreviewRenderDocument;
+});
+
+describe("RendererApp", () => {
+  it("renders markdown pushed by the native bridge", async () => {
+    render(<RendererApp />);
+    expect(screen.getByText("等待文档...")).toBeInTheDocument();
+
+    act(() => {
+      window.__mdreviewRenderDocument?.({
+        type: "renderDocument",
+        path: "/tmp/README.md",
+        name: "README.md",
+        content: "# Hello"
+      });
+    });
+
+    expect(await screen.findByRole("heading", { name: "Hello" })).toBeInTheDocument();
+  });
+});
+```
+
 - [ ] **Step 2: Run renderer bridge tests and verify failure**
 
 Run:
 
 ```bash
-npm test -- tests/web/renderer/resources.test.ts tests/web/renderer/bridge.test.ts
+npm test -- tests/web/renderer/resources.test.ts tests/web/renderer/bridge.test.ts tests/web/renderer/RendererApp.test.tsx
 ```
 
 Expected:
@@ -1325,12 +1428,30 @@ declare global {
 }
 ```
 
+Replace `src/web/main.tsx` so native file-loaded bundles mount `RendererApp`, while browser development keeps the existing `App`:
+
+```tsx
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { App } from "./App";
+import { RendererApp } from "./renderer/RendererApp";
+import "./styles.css";
+
+const Root = window.location.protocol === "file:" ? RendererApp : App;
+
+createRoot(document.getElementById("root") as HTMLElement).render(
+  <StrictMode>
+    <Root />
+  </StrictMode>
+);
+```
+
 - [ ] **Step 5: Verify renderer bridge**
 
 Run:
 
 ```bash
-npm test -- tests/web/renderer/resources.test.ts tests/web/renderer/bridge.test.ts tests/web/MarkdownView.test.tsx
+npm test -- tests/web/renderer/resources.test.ts tests/web/renderer/bridge.test.ts tests/web/renderer/RendererApp.test.tsx tests/web/MarkdownView.test.tsx
 npm run typecheck
 ```
 
@@ -1339,6 +1460,7 @@ Expected:
 ```text
 PASS tests/web/renderer/resources.test.ts
 PASS tests/web/renderer/bridge.test.ts
+PASS tests/web/renderer/RendererApp.test.tsx
 No TypeScript errors.
 ```
 
@@ -1508,7 +1630,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     return OpenResponse(accepted: false, action: .rejected, message: "目录中没有 Markdown 文件：\(request.path)")
                 }
                 let defaultDocument = url.appendingPathComponent(defaultRelativePath)
-                result = AppReducer.apply(.openDirectory(url, defaultDocument: defaultDocument, newWindow: request.newWindow), to: &model)
+                result = AppReducer.apply(.openDirectory(url, defaultDocument: defaultDocument, fileTree: tree, newWindow: request.newWindow), to: &model)
             } catch {
                 return OpenResponse(accepted: false, action: .rejected, message: "无法扫描目录：\(request.path)")
             }
@@ -1537,31 +1659,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let main = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu(title: MenuText.appName)
-        appMenu.addItem(NSMenuItem(title: MenuText.settings, action: #selector(openSettings), keyEquivalent: ","))
+        appMenu.addItem(menuItem(title: MenuText.settings, action: #selector(openSettings), keyEquivalent: ","))
         appItem.submenu = appMenu
         main.addItem(appItem)
 
         let fileItem = NSMenuItem()
         let fileMenu = NSMenu(title: MenuText.file)
-        fileMenu.addItem(NSMenuItem(title: MenuText.openFile, action: #selector(openFile), keyEquivalent: "o"))
-        fileMenu.addItem(NSMenuItem(title: MenuText.openFolder, action: #selector(openFolder), keyEquivalent: "O"))
-        fileMenu.addItem(NSMenuItem(title: MenuText.openFolderInNewWindow, action: #selector(openFolderInNewWindow), keyEquivalent: "n"))
+        fileMenu.addItem(menuItem(title: MenuText.openFile, action: #selector(openFile), keyEquivalent: "o"))
+        fileMenu.addItem(menuItem(title: MenuText.openFolder, action: #selector(openFolder), keyEquivalent: "O"))
+        fileMenu.addItem(menuItem(title: MenuText.openFolderInNewWindow, action: #selector(openFolderInNewWindow), keyEquivalent: "n"))
         fileMenu.addItem(.separator())
-        fileMenu.addItem(NSMenuItem(title: MenuText.closeTab, action: #selector(closeTab), keyEquivalent: "w"))
+        fileMenu.addItem(menuItem(title: MenuText.closeTab, action: #selector(closeTab), keyEquivalent: "w"))
         fileMenu.addItem(NSMenuItem(title: MenuText.closeWindow, action: #selector(NSWindow.performClose(_:)), keyEquivalent: "W"))
         fileItem.submenu = fileMenu
         main.addItem(fileItem)
 
         let viewItem = NSMenuItem()
         let viewMenu = NSMenu(title: MenuText.view)
-        viewMenu.addItem(NSMenuItem(title: MenuText.toggleFiles, action: #selector(toggleFiles), keyEquivalent: "1"))
-        viewMenu.addItem(NSMenuItem(title: MenuText.toggleOutline, action: #selector(toggleOutline), keyEquivalent: "2"))
-        viewMenu.addItem(NSMenuItem(title: MenuText.reloadCurrentDocument, action: #selector(reloadDocument), keyEquivalent: "r"))
+        viewMenu.addItem(menuItem(title: MenuText.toggleFiles, action: #selector(toggleFiles), keyEquivalent: "1"))
+        viewMenu.addItem(menuItem(title: MenuText.toggleOutline, action: #selector(toggleOutline), keyEquivalent: "2"))
+        viewMenu.addItem(menuItem(title: MenuText.reloadCurrentDocument, action: #selector(reloadDocument), keyEquivalent: "r"))
         viewItem.submenu = viewMenu
         main.addItem(viewItem)
 
         main.addItem(NSMenuItem(title: MenuText.window, action: nil, keyEquivalent: ""))
         return main
+    }
+
+    private func menuItem(title: String, action: Selector, keyEquivalent: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
+        item.target = self
+        return item
     }
 
     @objc private func openSettings() {
@@ -1786,6 +1914,8 @@ git commit -m "feat: add native window shell and Chinese menus"
 ### Task 7: WKWebView Renderer Controller and Resource Scheme
 
 **Files:**
+- Create: `native/Sources/MdreviewCore/ResourceURL.swift`
+- Create: `native/Sources/MdreviewCore/NativeOutlineItem.swift`
 - Create: `native/Sources/MdreviewApp/RendererViewController.swift`
 - Create: `native/Sources/MdreviewApp/ResourceSchemeHandler.swift`
 - Modify: `native/Sources/MdreviewApp/MainWindowController.swift`
@@ -1832,6 +1962,24 @@ public enum ResourceURL {
 }
 ```
 
+Create `native/Sources/MdreviewCore/NativeOutlineItem.swift`:
+
+```swift
+import Foundation
+
+public struct NativeOutlineItem: Codable, Equatable {
+    public let id: String
+    public let text: String
+    public let depth: Int
+
+    public init(id: String, text: String, depth: Int) {
+        self.id = id
+        self.text = text
+        self.depth = depth
+    }
+}
+```
+
 - [ ] **Step 3: Add WKWebView controller**
 
 Create `native/Sources/MdreviewApp/RendererViewController.swift`:
@@ -1841,8 +1989,11 @@ import AppKit
 import WebKit
 import MdreviewCore
 
-final class RendererViewController: NSViewController, WKScriptMessageHandler {
+final class RendererViewController: NSViewController, WKScriptMessageHandler, WKNavigationDelegate {
     private let webView: WKWebView
+    private var isRendererLoaded = false
+    private var pendingScript: String?
+    var onOutlineChanged: (([NativeOutlineItem]) -> Void)?
 
     init(resourceHandler: ResourceSchemeHandler) {
         let configuration = WKWebViewConfiguration()
@@ -1851,6 +2002,7 @@ final class RendererViewController: NSViewController, WKScriptMessageHandler {
         configuration.userContentController = contentController
         self.webView = WKWebView(frame: .zero, configuration: configuration)
         super.init(nibName: nil, bundle: nil)
+        webView.navigationDelegate = self
         contentController.add(self, name: "mdreview")
     }
 
@@ -1863,6 +2015,7 @@ final class RendererViewController: NSViewController, WKScriptMessageHandler {
     }
 
     func loadRenderer(from url: URL) {
+        isRendererLoaded = false
         webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
     }
 
@@ -1870,11 +2023,36 @@ final class RendererViewController: NSViewController, WKScriptMessageHandler {
         let payload: [String: Any] = ["type": "renderDocument", "path": path, "name": name, "content": content, "scrollPosition": scrollPosition ?? 0]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let json = String(data: data, encoding: .utf8) else { return }
-        webView.evaluateJavaScript("window.__mdreviewRenderDocument && window.__mdreviewRenderDocument(\(json));")
+        evaluateOrQueue("window.__mdreviewRenderDocument && window.__mdreviewRenderDocument(\(json));")
+    }
+
+    private func evaluateOrQueue(_ script: String) {
+        guard isRendererLoaded else {
+            pendingScript = script
+            return
+        }
+        webView.evaluateJavaScript(script)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        isRendererLoaded = true
+        if let pendingScript {
+            self.pendingScript = nil
+            webView.evaluateJavaScript(pendingScript)
+        }
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        // The window controller owns state routing; this controller only receives renderer messages.
+        guard let body = message.body as? [String: Any],
+              body["type"] as? String == "outlineChanged",
+              let rawItems = body["items"] as? [[String: Any]] else { return }
+        let items = rawItems.compactMap { item -> NativeOutlineItem? in
+            guard let id = item["id"] as? String,
+                  let text = item["text"] as? String,
+                  let depth = item["depth"] as? Int else { return nil }
+            return NativeOutlineItem(id: id, text: text, depth: depth)
+        }
+        onOutlineChanged?(items)
     }
 }
 ```
@@ -1922,7 +2100,7 @@ final class ResourceSchemeHandler: NSObject, WKURLSchemeHandler {
 }
 ```
 
-Update `native/Sources/MdreviewApp/MainWindowController.swift` to replace the temporary text content with the renderer:
+Update `native/Sources/MdreviewApp/MainWindowController.swift` to replace the initial `NSTextView` content with the renderer:
 
 ```swift
 private let resourceHandler = ResourceSchemeHandler()
@@ -1933,6 +2111,9 @@ In `buildLayout()`, replace the `NSTextView` scroll view with:
 
 ```swift
 splitView.addArrangedSubview(renderer.view)
+if let rendererURL = Bundle.main.resourceURL?.appendingPathComponent("renderer/index.html") {
+    renderer.loadRenderer(from: rendererURL)
+}
 ```
 
 In `apply(windowModel:)`, after setting the title, render the active tab:
@@ -1988,6 +2169,7 @@ git commit -m "feat: add WKWebView renderer controller"
 - Modify: `native/Sources/MdreviewApp/MainWindowController.swift`
 - Modify: `native/Sources/MdreviewApp/DocumentTabBar.swift`
 - Modify: `native/Sources/MdreviewApp/SidebarController.swift`
+- Modify: `native/Sources/MdreviewApp/RendererViewController.swift`
 - Modify: `native/Sources/MdreviewApp/SettingsWindowController.swift`
 - Modify: `native/Sources/MdreviewCore/SettingsStore.swift`
 - Create: `native/Tests/MdreviewCoreTests/SettingsTests.swift`
@@ -2031,22 +2213,234 @@ final class SettingsTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Confirm visible tab/sidebar behavior**
+- [ ] **Step 2: Add interactive Files, Outline, tabs, and view menu behavior**
 
-`DocumentTabBar` from Task 6 already renders one native button per `DocumentTab` and exposes `onSelectTab`. Keep `SidebarController.apply(layoutMode:)` as the single source of truth for single-file layout:
+Replace `native/Sources/MdreviewApp/SidebarController.swift` with:
 
 ```swift
-func apply(layoutMode: LayoutMode) {
-    filesView.isHidden = layoutMode == .outlineAndDocument
+import AppKit
+import MdreviewCore
+
+final class SidebarController {
+    let filesView = NSScrollView()
+    let outlineView = NSScrollView()
+    private let filesStack = NSStackView()
+    private let outlineStack = NSStackView()
+    var onSelectFile: ((String) -> Void)?
+    var onSelectHeading: ((String) -> Void)?
+
+    init() {
+        configure(filesView, stack: filesStack)
+        configure(outlineView, stack: outlineStack)
+    }
+
+    private func configure(_ scrollView: NSScrollView, stack: NSStackView) {
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 2
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        scrollView.documentView = stack
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+    }
+
+    func apply(layoutMode: LayoutMode) {
+        filesView.isHidden = layoutMode == .outlineAndDocument
+    }
+
+    func renderFiles(nodes: [MarkdownNode], activePath: String?) {
+        clear(filesStack)
+        if nodes.isEmpty {
+            filesStack.addArrangedSubview(NSTextField(labelWithString: "没有 Markdown 文件"))
+            return
+        }
+        addFiles(nodes, depth: 0, activePath: activePath)
+    }
+
+    private func addFiles(_ nodes: [MarkdownNode], depth: Int, activePath: String?) {
+        for node in nodes {
+            if node.type == .directory {
+                let label = NSTextField(labelWithString: String(repeating: "  ", count: depth) + node.name)
+                filesStack.addArrangedSubview(label)
+                addFiles(node.children, depth: depth + 1, activePath: activePath)
+            } else {
+                let button = NSButton(title: String(repeating: "  ", count: depth) + node.name, target: self, action: #selector(selectFile(_:)))
+                button.identifier = NSUserInterfaceItemIdentifier(node.path)
+                button.bezelStyle = node.path == activePath ? .rounded : .texturedRounded
+                filesStack.addArrangedSubview(button)
+            }
+        }
+    }
+
+    func renderOutline(_ items: [NativeOutlineItem]) {
+        clear(outlineStack)
+        if items.isEmpty {
+            outlineStack.addArrangedSubview(NSTextField(labelWithString: "没有大纲"))
+            return
+        }
+        for item in items {
+            let title = String(repeating: "  ", count: max(0, item.depth - 1)) + item.text
+            let button = NSButton(title: title, target: self, action: #selector(selectHeading(_:)))
+            button.identifier = NSUserInterfaceItemIdentifier(item.id)
+            button.bezelStyle = .texturedRounded
+            outlineStack.addArrangedSubview(button)
+        }
+    }
+
+    func toggleFiles() {
+        filesView.isHidden.toggle()
+    }
+
+    func toggleOutline() {
+        outlineView.isHidden.toggle()
+    }
+
+    @objc private func selectFile(_ sender: NSButton) {
+        guard let path = sender.identifier?.rawValue else { return }
+        onSelectFile?(path)
+    }
+
+    @objc private func selectHeading(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        onSelectHeading?(id)
+    }
+
+    private func clear(_ stack: NSStackView) {
+        stack.arrangedSubviews.forEach { view in
+            stack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+    }
 }
 ```
 
-Update `MainWindowController` with:
+Update `native/Sources/MdreviewApp/MainWindowController.swift` with these properties:
+
+```swift
+var onOpenWorkspaceFile: ((URL) -> Void)?
+var onSelectTab: ((UUID) -> Void)?
+private var currentWorkspaceRoot: URL?
+private var currentWindowModel: WindowModel?
+```
+
+In `buildLayout()`, after adding the split view columns, wire the callbacks:
+
+```swift
+sidebar.onSelectFile = { [weak self] relativePath in
+    guard let self, let root = self.currentWorkspaceRoot else { return }
+    self.onOpenWorkspaceFile?(root.appendingPathComponent(relativePath))
+}
+sidebar.onSelectHeading = { [weak self] id in
+    self?.renderer.scrollToHeading(id: id)
+}
+renderer.onOutlineChanged = { [weak self] items in
+    self?.sidebar.renderOutline(items)
+}
+tabBar.onSelectTab = { [weak self] tabID in
+    self?.onSelectTab?(tabID)
+}
+```
+
+Update `RendererViewController` with the heading scroll method used by the Outline column:
+
+```swift
+func scrollToHeading(id: String) {
+    let escaped = id.replacingOccurrences(of: "'", with: "\\'")
+    evaluateOrQueue("document.getElementById('\(escaped)')?.scrollIntoView({ block: 'start' });")
+}
+```
+
+Replace `MainWindowController.apply(windowModel:)` with:
 
 ```swift
 func apply(windowModel: WindowModel) {
+    currentWindowModel = windowModel
+    currentWorkspaceRoot = windowModel.workspaceRoot
     tabBar.render(tabs: windowModel.tabs, activeTabID: windowModel.activeTabID)
     sidebar.apply(layoutMode: windowModel.layoutMode)
+    let active = windowModel.tabs.first(where: { $0.id == windowModel.activeTabID })
+    let activeRelativePath = active.flatMap { tab -> String? in
+        guard let root = windowModel.workspaceRoot else { return nil }
+        let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        return tab.url.path.hasPrefix(prefix) ? String(tab.url.path.dropFirst(prefix.count)) : nil
+    }
+    sidebar.renderFiles(nodes: windowModel.fileTree, activePath: activeRelativePath)
+    window?.title = active?.title ?? "mdreview"
+    if let active {
+        render(tab: active, workspaceRoot: windowModel.workspaceRoot)
+    }
+}
+```
+
+Add these view actions to `MainWindowController`:
+
+```swift
+func toggleFiles() {
+    sidebar.toggleFiles()
+}
+
+func toggleOutline() {
+    sidebar.toggleOutline()
+}
+
+func reloadDocument() {
+    guard let windowModel = currentWindowModel,
+          let active = windowModel.tabs.first(where: { $0.id == windowModel.activeTabID }) else { return }
+    render(tab: active, workspaceRoot: windowModel.workspaceRoot)
+}
+```
+
+In `AppDelegate.createWindow(activate:)`, assign the workspace file callback before `showWindow`:
+
+```swift
+controller.onOpenWorkspaceFile = { [weak self] url in
+    _ = self?.handleOpenRequest(OpenRequest(kind: .openFile, path: url.path, newWindow: false))
+}
+controller.onSelectTab = { [weak self, weak controller] tabID in
+    guard let self, let controller,
+          let index = self.windows.firstIndex(where: { $0 === controller }),
+          self.model.windows.indices.contains(index) else { return }
+    self.model.windows[index].activeTabID = tabID
+    self.model.activeWindowID = self.model.windows[index].id
+    self.synchronizeWindows()
+}
+```
+
+Replace the Task 6 menu action stubs in `AppDelegate` with:
+
+```swift
+@objc private func closeTab() {
+    guard let index = activeWindowIndex(),
+          let activeTabID = model.windows[index].activeTabID else { return }
+    model.windows[index].tabs.removeAll { $0.id == activeTabID }
+    model.windows[index].activeTabID = model.windows[index].tabs.last?.id
+    synchronizeWindows()
+}
+
+@objc private func toggleFiles() {
+    activeController()?.toggleFiles()
+}
+
+@objc private func toggleOutline() {
+    activeController()?.toggleOutline()
+}
+
+@objc private func reloadDocument() {
+    activeController()?.reloadDocument()
+}
+
+private func activeWindowIndex() -> Array<WindowModel>.Index? {
+    guard let id = model.activeWindowID else { return nil }
+    return model.windows.firstIndex(where: { $0.id == id })
+}
+
+private func activeController() -> MainWindowController? {
+    if let key = windows.first(where: { $0.window?.isKeyWindow == true }) {
+        return key
+    }
+    guard let activeID = model.activeWindowID,
+          let index = model.windows.firstIndex(where: { $0.id == activeID }) else { return windows.last }
+    return windows.indices.contains(index) ? windows[index] : windows.last
 }
 ```
 
@@ -2379,7 +2773,7 @@ Add this script entry to `package.json` before creating `scripts/package-macos-a
 
 ```json
 {
-  "build:app": "npm run build:web && swift build --package-path native && node scripts/package-macos-app.mjs"
+  "build:app": "npm run build && swift build --package-path native && node scripts/package-macos-app.mjs"
 }
 ```
 
@@ -2425,7 +2819,7 @@ Create `native/Info.plist`:
 Create `scripts/package-macos-app.mjs`:
 
 ```js
-import { mkdir, cp, copyFile, rm } from "node:fs/promises";
+import { chmod, mkdir, cp, copyFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -2440,6 +2834,7 @@ await mkdir(macos, { recursive: true });
 await mkdir(resources, { recursive: true });
 await copyFile(path.join(root, "native", "Info.plist"), path.join(contents, "Info.plist"));
 await copyFile(path.join(root, "native", ".build", "debug", "mdreview-app"), path.join(macos, "mdreview-app"));
+await chmod(path.join(macos, "mdreview-app"), 0o755);
 await cp(path.join(root, "dist", "client"), path.join(resources, "renderer"), { recursive: true });
 console.log(`已创建 ${appRoot}`);
 ```
@@ -2448,7 +2843,7 @@ Update `package.json` scripts:
 
 ```json
 {
-  "build:app": "npm run build:web && swift build --package-path native && node scripts/package-macos-app.mjs",
+  "build:app": "npm run build && swift build --package-path native && node scripts/package-macos-app.mjs",
   "test:all": "npm run typecheck && npm test && npm run test:native"
 }
 ```
