@@ -7,6 +7,8 @@ final class SidebarController {
     let outlineView: NSScrollView = SidebarScrollView()
     private let filesStack = SidebarStackView()
     private let outlineStack = SidebarStackView()
+    private var outlineItems = [NativeOutlineItem]()
+    private var activeHeadingID: String?
     var onSelectFile: ((String) -> Void)?
     var onSelectHeading: ((String) -> Void)?
 
@@ -32,7 +34,7 @@ final class SidebarController {
     func renderFiles(nodes: [MarkdownNode], activePath: String?) {
         clear(filesStack)
         if nodes.isEmpty {
-            filesStack.addArrangedSubview(NSTextField(labelWithString: "没有 Markdown 文件"))
+            filesStack.addArrangedSubview(sidebarLabel("没有 Markdown 文件"))
         } else {
             addFiles(nodes, depth: 0, activePath: activePath)
         }
@@ -42,29 +44,46 @@ final class SidebarController {
     private func addFiles(_ nodes: [MarkdownNode], depth: Int, activePath: String?) {
         for node in nodes {
             if node.type == .directory {
-                let label = NSTextField(labelWithString: String(repeating: "  ", count: depth) + node.name)
+                let label = sidebarLabel(node.name, identifier: "directory:\(node.path)", depth: depth)
                 filesStack.addArrangedSubview(label)
                 addFiles(node.children, depth: depth + 1, activePath: activePath)
             } else {
-                let button = NSButton(title: String(repeating: "  ", count: depth) + node.name, target: self, action: #selector(selectFile(_:)))
-                button.identifier = NSUserInterfaceItemIdentifier(node.path)
-                button.bezelStyle = node.path == activePath ? .rounded : .texturedRounded
-                filesStack.addArrangedSubview(button)
+                let row = SidebarRowButton(
+                    title: node.name,
+                    identifier: node.path,
+                    depth: depth,
+                    isActive: node.path == activePath,
+                    kind: .file,
+                    target: self,
+                    action: #selector(selectFile(_:))
+                )
+                filesStack.addArrangedSubview(row)
             }
         }
     }
 
     func renderOutline(_ items: [NativeOutlineItem]) {
+        outlineItems = items
+        activeHeadingID = nil
+        reloadOutlineRows()
+    }
+
+    private func reloadOutlineRows() {
         clear(outlineStack)
-        if items.isEmpty {
-            outlineStack.addArrangedSubview(NSTextField(labelWithString: "没有大纲"))
+        if outlineItems.isEmpty {
+            outlineStack.addArrangedSubview(sidebarLabel("没有大纲"))
         } else {
-            for item in items {
-                let title = String(repeating: "  ", count: max(0, item.depth - 1)) + item.text
-                let button = NSButton(title: title, target: self, action: #selector(selectHeading(_:)))
-                button.identifier = NSUserInterfaceItemIdentifier(item.id)
-                button.bezelStyle = .texturedRounded
-                outlineStack.addArrangedSubview(button)
+            for item in outlineItems {
+                let row = SidebarRowButton(
+                    title: item.text,
+                    identifier: item.id,
+                    depth: max(0, item.depth - 1),
+                    isActive: item.id == activeHeadingID,
+                    kind: .outline,
+                    target: self,
+                    action: #selector(selectHeading(_:))
+                )
+                outlineStack.addArrangedSubview(row)
             }
         }
         outlineView.needsLayout = true
@@ -78,14 +97,36 @@ final class SidebarController {
         outlineView.isHidden.toggle()
     }
 
-    @objc private func selectFile(_ sender: NSButton) {
+    @objc private func selectFile(_ sender: SidebarRowButton) {
         guard let path = sender.identifier?.rawValue else { return }
         onSelectFile?(path)
     }
 
-    @objc private func selectHeading(_ sender: NSButton) {
+    @objc private func selectHeading(_ sender: SidebarRowButton) {
         guard let id = sender.identifier?.rawValue else { return }
+        activeHeadingID = id
+        reloadOutlineRows()
         onSelectHeading?(id)
+    }
+
+    private func sidebarLabel(_ title: String, identifier: String? = nil, depth: Int = 0) -> NSTextField {
+        let label = NSTextField(labelWithString: title)
+        label.identifier = identifier.map { NSUserInterfaceItemIdentifier($0) }
+        label.tag = depth
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .left
+        paragraphStyle.lineBreakMode = .byTruncatingMiddle
+        paragraphStyle.firstLineHeadIndent = CGFloat(depth * 14)
+        paragraphStyle.headIndent = CGFloat(depth * 14)
+        label.attributedStringValue = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 12),
+                .foregroundColor: NSColor.tertiaryLabelColor,
+                .paragraphStyle: paragraphStyle
+            ]
+        )
+        return label
     }
 
     private func clear(_ stack: NSStackView) {
