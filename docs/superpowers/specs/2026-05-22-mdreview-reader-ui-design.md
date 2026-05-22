@@ -61,12 +61,23 @@ Outline 行为：
 - H1 比更深层级略强，但仍保持克制。
 - H2-H6 使用缩进和更浅文本区分层级。
 - 没有大纲时显示小号弱提示。
+- 当前行语义为“最近一次通过鼠标或键盘选择的大纲项”，用于确认用户刚点击的跳转目标。
+- 当前行在切换 tab、重新渲染文档或大纲项消失时清空。
+- 本轮不实现随正文滚动自动更新的大纲 scrollspy。后续如果需要 scrollspy，再由 renderer 发送 `currentHeadingChanged` 一类事件给原生层。
 
 Files 行为：
 
 - 目录使用弱标签样式。
 - Markdown 文件使用可点击文本行。
 - 当前文件行和 Outline 当前行使用一致的 active 视觉语言。
+- Files 当前行语义为“当前 active tab 对应的文件路径”。
+
+交互和可访问性：
+
+- 侧栏行可以使用自定义 `NSButton`、`NSControl` 或等价原生控件实现，但不能退化成只带手势的静态 `NSTextField`。
+- 需要保留 target/action、键盘激活、可聚焦状态和 VoiceOver 可读 label。
+- 视觉上隐藏按钮边框，不等于移除控件语义。
+- hover 状态使用 AppKit tracking area 或等价机制实现；如果系统辅助功能设置禁用动画，hover 不应依赖动画才能理解。
 
 ## 正文区域设计
 
@@ -129,6 +140,9 @@ Web 渲染层：
 - `src/web/styles.css` 负责 Markdown 正文样式。
 - `RendererApp` 继续把 Markdown 内容交给 `MarkdownView`。
 - Markdown 解析和渲染行为不变。
+- 原生 WKWebView 的 Reader 样式必须加作用域，例如让 `RendererApp` 输出 `.native-reader` / `.reader-renderer` 根节点，并把正文样式限制在该作用域内。
+- 旧浏览器 preview 仍可继续使用现有三栏布局，不能因为本轮 Reader UI 改动被意外改成原生 App 样式。
+- 如果有样式确实需要两端共享，必须显式写成共享 Markdown typography，而不是通过全局 `.markdown-body` 选择器隐式影响两套入口。
 
 不引入新的 UI 框架，不替换渲染管线。实现范围应限制在 AppKit 样式和 renderer CSS。
 
@@ -139,6 +153,8 @@ Web 渲染层：
 - 单文件模式仍然隐藏 Files，只显示 Outline。
 - Outline 行可见，并有合理尺寸。
 - 侧栏行不再渲染成带边框的系统按钮。
+- 侧栏行仍然是可交互控件，并保留 accessibility label。
+- 点击或键盘选择大纲项后，该大纲项进入 active 状态；切换文档后 active 状态被清空或更新。
 - 关闭最后一个 active tab 仍然会移除窗口并走退出 App 的路径。
 
 Renderer 测试需要覆盖：
@@ -146,6 +162,7 @@ Renderer 测试需要覆盖：
 - CSS 调整后 Markdown 渲染仍然工作。
 - Outline 提取仍然会把 heading 发送给原生层。
 - 代码块、表格、图片、Mermaid、math 保持现有行为。
+- 原生 renderer 使用 scoped root class，Reader 样式不会影响旧浏览器 preview 的 app shell。
 
 手动验证需要覆盖：
 
@@ -153,6 +170,8 @@ Renderer 测试需要覆盖：
 - 确认单文件模式只显示 Outline + 正文。
 - 确认 Outline 行看起来像文本导航，而不是按钮。
 - 确认正文区域使用长文阅读间距。
+- 用截图或 AX 信息确认正文宽度约 620px、顶部留白约 56px，侧栏行高度约 24px。
+- 点击大纲项后确认该行有轻量 active 状态，并且 VoiceOver/Accessibility Inspector 能读出可操作 label。
 - 确认 `Cmd+W` 可以关闭 tab / app。
 - 打开 `mdreview docs`，确认 Files + Outline 都使用同一套安静导航样式。
 
