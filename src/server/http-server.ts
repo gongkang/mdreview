@@ -4,6 +4,7 @@ import path from "node:path";
 import { apiError } from "../shared/errors";
 import { API_TOKEN_HEADER } from "../shared/security";
 import type { PreviewSession } from "./session";
+import { watchSingleFile, writeSse } from "./events";
 import { findRootReadme, listMarkdownFiles } from "./file-tree";
 import { assertInsideRoot } from "./path-utils";
 
@@ -60,6 +61,13 @@ async function readDocument(session: PreviewSession, relativePath: string) {
 export async function startPreviewServer(options: StartPreviewServerOptions): Promise<StartedPreviewServer> {
   const { session, staticDir = path.resolve("dist/client") } = options;
   const staticRoot = path.resolve(staticDir);
+  const eventClients = new Set<ServerResponse>();
+  const watcher =
+    session.mode === "file"
+      ? watchSingleFile(session.rootRealPath, (event) => {
+          for (const client of eventClients) writeSse(client, event);
+        })
+      : null;
 
   async function sendStatic(response: ServerResponse, assetPath: string) {
     const realStaticRoot = await realpath(staticRoot);
@@ -81,6 +89,16 @@ export async function startPreviewServer(options: StartPreviewServerOptions): Pr
     if (url.pathname.startsWith("/api/")) {
       if (!requireToken(request, response, session.token)) return;
       try {
+        if (url.pathname === "/api/events") {
+          response.writeHead(200, {
+            "content-type": "text/event-stream",
+            "cache-control": "no-store",
+            connection: "keep-alive"
+          });
+          eventClients.add(response);
+          request.on("close", () => eventClients.delete(response));
+          return;
+        }
         if (url.pathname === "/api/session") {
           sendJson(response, 200, {
             mode: session.mode,
@@ -122,6 +140,15 @@ export async function startPreviewServer(options: StartPreviewServerOptions): Pr
   return {
     port: address.port,
     url: `http://127.0.0.1:${address.port}`,
-    close: () => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+    close: async () => {
+      for (const client of eventClients) {
+        client.end();
+      }
+      eventClients.clear();
+      await watcher?.close();
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
   };
 }

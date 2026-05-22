@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { DocumentResponse, FileNode, SessionResponse } from "../shared/types";
-import { ApiClient, readTokenFromLocation } from "./api-client";
+import { ApiClient, readTokenFromLocation, subscribeToDocumentEvents } from "./api-client";
 import { ErrorView } from "./components/ErrorView";
 import { FileTree } from "./components/FileTree";
 import { MarkdownView } from "./components/MarkdownView";
@@ -45,6 +45,18 @@ export function App() {
     if (!client) return;
     setDocument(await client.document(path));
   }
+
+  useEffect(() => {
+    if (!token || !client || session?.mode !== "file" || !document) return;
+    return subscribeToDocumentEvents(token, () => {
+      void client
+        .document(document.path)
+        .then(setDocument)
+        .catch((reason) => {
+          setError(reason instanceof Error ? reason.message : String(reason));
+        });
+    });
+  }, [token, client, session?.mode, document]);
 
   if (error) return <ErrorView title="Preview session unavailable" detail={error} />;
   if (!session || !document) return <main className="app-shell loading">Loading...</main>;
