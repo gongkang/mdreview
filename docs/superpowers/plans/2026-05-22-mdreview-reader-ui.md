@@ -196,6 +196,62 @@ func testOutlineSelectionAppliesActiveStateAndRerenderClearsIt() throws {
     let rerenderedTitleRow = try XCTUnwrap(findSubviews(ofType: SidebarRowButton.self, in: controller.window?.contentView).first { $0.title == "Title" })
     XCTAssertFalse(rerenderedTitleRow.isActive)
 }
+
+func testDirectoryModeFilesUseTextRowsAndActiveFileState() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("mdreview-files-\(UUID().uuidString)", isDirectory: true)
+    let nested = root.appendingPathComponent("guide/advanced", isDirectory: true)
+    try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+    let file = nested.appendingPathComponent("Intro.md")
+    try "# Intro\n".write(to: file, atomically: true, encoding: .utf8)
+
+    let controller = MainWindowController()
+    defer { controller.window?.close() }
+    controller.showWindow(nil)
+
+    let tab = DocumentTab(url: file)
+    let tree = [
+        MarkdownNode(
+            type: .directory,
+            name: "guide",
+            path: "guide",
+            children: [
+                MarkdownNode(
+                    type: .directory,
+                    name: "advanced",
+                    path: "guide/advanced",
+                    children: [
+                        MarkdownNode(type: .file, name: "Intro.md", path: "guide/advanced/Intro.md", children: [])
+                    ]
+                )
+            ]
+        )
+    ]
+
+    controller.apply(
+        windowModel: WindowModel(
+            workspaceRoot: root,
+            fileTree: tree,
+            tabs: [tab],
+            activeTabID: tab.id,
+            layoutMode: .filesOutlineAndDocument
+        )
+    )
+    controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+    let fileRow = try XCTUnwrap(findSubviews(ofType: SidebarRowButton.self, in: controller.window?.contentView).first {
+        $0.identifier?.rawValue == "guide/advanced/Intro.md"
+    })
+    XCTAssertEqual(fileRow.title, "Intro.md")
+    XCTAssertEqual(fileRow.depth, 2)
+    XCTAssertTrue(fileRow.isActive)
+    XCTAssertEqual(fileRow.accessibilityLabel(), "Intro.md")
+
+    let advancedLabel = try XCTUnwrap(findSubviews(ofType: NSTextField.self, in: controller.window?.contentView).first {
+        $0.identifier?.rawValue == "directory:guide/advanced"
+    })
+    XCTAssertEqual(advancedLabel.stringValue, "advanced")
+    XCTAssertEqual(advancedLabel.tag, 1)
+}
 ```
 
 - [ ] **Step 2: Run tests and verify failure**
@@ -205,6 +261,7 @@ Run:
 ```bash
 npm run test:native -- --filter MainWindowLayoutTests/testSingleFileOutlineUsesAccessibleTextNavigationRows
 npm run test:native -- --filter MainWindowLayoutTests/testOutlineSelectionAppliesActiveStateAndRerenderClearsIt
+npm run test:native -- --filter MainWindowLayoutTests/testDirectoryModeFilesUseTextRowsAndActiveFileState
 ```
 
 Expected: FAIL because `SidebarRowButton` does not exist.
@@ -358,7 +415,7 @@ private var outlineItems = [NativeOutlineItem]()
 private var activeHeadingID: String?
 ```
 
-Replace `renderOutline(_:)`, `selectHeading(_:)`, and the file-row creation logic with this implementation:
+Replace `renderOutline(_:)`, `selectHeading(_:)`, the file-row creation logic, and the label helper with this implementation:
 
 ```swift
 func renderOutline(_ items: [NativeOutlineItem]) {
@@ -370,7 +427,7 @@ func renderOutline(_ items: [NativeOutlineItem]) {
 private func reloadOutlineRows() {
     clear(outlineStack)
     if outlineItems.isEmpty {
-        outlineStack.addArrangedSubview(emptyLabel("没有大纲"))
+        outlineStack.addArrangedSubview(sidebarLabel("没有大纲"))
     } else {
         for item in outlineItems {
             let row = SidebarRowButton(
@@ -391,8 +448,7 @@ private func reloadOutlineRows() {
 private func addFiles(_ nodes: [MarkdownNode], depth: Int, activePath: String?) {
     for node in nodes {
         if node.type == .directory {
-            let label = emptyLabel(node.name)
-            label.textColor = .tertiaryLabelColor
+            let label = sidebarLabel(node.name, identifier: "directory:\(node.path)", depth: depth)
             filesStack.addArrangedSubview(label)
             addFiles(node.children, depth: depth + 1, activePath: activePath)
         } else {
@@ -422,10 +478,23 @@ private func addFiles(_ nodes: [MarkdownNode], depth: Int, activePath: String?) 
     onSelectHeading?(id)
 }
 
-private func emptyLabel(_ title: String) -> NSTextField {
+private func sidebarLabel(_ title: String, identifier: String? = nil, depth: Int = 0) -> NSTextField {
     let label = NSTextField(labelWithString: title)
-    label.font = .systemFont(ofSize: 12)
-    label.textColor = .tertiaryLabelColor
+    label.identifier = identifier.map(NSUserInterfaceItemIdentifier.init)
+    label.tag = depth
+    let paragraphStyle = NSMutableParagraphStyle()
+    paragraphStyle.alignment = .left
+    paragraphStyle.lineBreakMode = .byTruncatingMiddle
+    paragraphStyle.firstLineHeadIndent = CGFloat(depth * 14)
+    paragraphStyle.headIndent = CGFloat(depth * 14)
+    label.attributedStringValue = NSAttributedString(
+        string: title,
+        attributes: [
+            .font: NSFont.systemFont(ofSize: 12),
+            .foregroundColor: NSColor.tertiaryLabelColor,
+            .paragraphStyle: paragraphStyle
+        ]
+    )
     return label
 }
 ```
@@ -433,24 +502,43 @@ private func emptyLabel(_ title: String) -> NSTextField {
 In `renderFiles(nodes:activePath:)`, replace the empty-state label with:
 
 ```swift
-filesStack.addArrangedSubview(emptyLabel("没有 Markdown 文件"))
+filesStack.addArrangedSubview(sidebarLabel("没有 Markdown 文件"))
 ```
 
 Keep `SidebarStackView` and `SidebarScrollView` from the baseline fix.
 
-- [ ] **Step 3: Run focused native tests**
+- [ ] **Step 3: Update the existing outline layout test for depth-based indentation**
+
+In `native/Tests/MdreviewAppTests/MainWindowLayoutTests.swift`, update `testSingleFileShowsNativeOutlineHeadings` so it no longer expects indentation spaces in the button title. Replace the title and frame assertions with:
+
+```swift
+let rows = findSubviews(ofType: SidebarRowButton.self, in: controller.window?.contentView)
+let titleRow = rows.first { $0.title == "Title" }
+let usageRow = rows.first { $0.title == "Usage" }
+
+XCTAssertNotNil(titleRow)
+XCTAssertNotNil(usageRow)
+XCTEqual(titleRow?.depth, 0)
+XCTEqual(usageRow?.depth, 1)
+XCTGreaterThan(titleRow?.frame.width ?? 0, 40)
+XCTGreaterThan(titleRow?.frame.height ?? 0, 16)
+XCTEqual(titleRow?.superview?.isFlipped, true)
+```
+
+- [ ] **Step 4: Run focused native tests**
 
 Run:
 
 ```bash
 npm run test:native -- --filter MainWindowLayoutTests/testSingleFileOutlineUsesAccessibleTextNavigationRows
 npm run test:native -- --filter MainWindowLayoutTests/testOutlineSelectionAppliesActiveStateAndRerenderClearsIt
+npm run test:native -- --filter MainWindowLayoutTests/testDirectoryModeFilesUseTextRowsAndActiveFileState
 npm run test:native -- --filter MainWindowLayoutTests/testSingleFileShowsNativeOutlineHeadings
 ```
 
-Expected: PASS for all three filters.
+Expected: PASS for all four filters.
 
-- [ ] **Step 4: Commit sidebar work**
+- [ ] **Step 5: Commit sidebar work**
 
 Run:
 
@@ -972,10 +1060,42 @@ Expected: screenshot shows:
 Run:
 
 ```bash
-osascript -e 'tell application "System Events" to set frontmost of process "mdreview-app" to true' -e 'tell application "System Events" to tell process "mdreview-app" to return {name, role, position, size} of UI elements of window 1'
+osascript <<'APPLESCRIPT'
+on collectNamedElements(theElement)
+  set rows to {}
+  tell application "System Events"
+    try
+      set childElements to UI elements of theElement
+    on error
+      return rows
+    end try
+
+    repeat with childElement in childElements
+      try
+        set childName to name of childElement
+        set childRole to role of childElement
+        set childPosition to position of childElement
+        set childSize to size of childElement
+        if childName is not missing value and childName is not "" then
+          set end of rows to {childName as text, childRole as text, childPosition, childSize}
+        end if
+      end try
+      set rows to rows & my collectNamedElements(childElement)
+    end repeat
+  end tell
+  return rows
+end collectNamedElements
+
+tell application "System Events"
+  set frontmost of process "mdreview-app" to true
+  tell process "mdreview-app"
+    return my collectNamedElements(window 1)
+  end tell
+end tell
+APPLESCRIPT
 ```
 
-Expected: output includes clickable controls for outline rows with readable names such as `mdreview`, `使用`, and `开发`. Row heights should be near 24px. Use Accessibility Inspector if the AppleScript output is too coarse on this macOS version.
+Expected: recursive output includes clickable controls for outline rows with readable names such as `mdreview`, `使用`, and `开发`. Row heights should be near 24px. The native XCTest assertions from Task 2 and Task 3 are the primary accessibility gate; use Accessibility Inspector only as manual backup if this AppleScript output is too coarse on this macOS version.
 
 - [ ] **Step 6: Verify `Cmd+W` closes the last tab/app**
 
@@ -1009,7 +1129,7 @@ git add src/web/styles.css tests/web/reader-style.test.ts
 git commit -m "fix: polish reader typography"
 ```
 
-If Task 7 exposes a sidebar issue, return to Task 3, change `native/Sources/MdreviewApp/SidebarRowButton.swift`, `native/Sources/MdreviewApp/SidebarController.swift`, or `native/Tests/MdreviewAppTests/MainWindowLayoutTests.swift`, rerun Task 3 Step 3, and commit with:
+If Task 7 exposes a sidebar issue, return to Task 3, change `native/Sources/MdreviewApp/SidebarRowButton.swift`, `native/Sources/MdreviewApp/SidebarController.swift`, or `native/Tests/MdreviewAppTests/MainWindowLayoutTests.swift`, rerun Task 3 Step 4, and commit with:
 
 ```bash
 git add \
