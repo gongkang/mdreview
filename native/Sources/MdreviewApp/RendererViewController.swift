@@ -37,7 +37,7 @@ final class RendererViewController: NSViewController, WKScriptMessageHandler, WK
         let payload: [String: Any] = ["type": "renderDocument", "path": path, "name": name, "content": content, "scrollPosition": scrollPosition ?? 0]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let json = String(data: data, encoding: .utf8) else { return }
-        evaluateOrQueue("window.__mdreviewRenderDocument && window.__mdreviewRenderDocument(\(json));")
+        evaluateOrQueue("window.__mdreviewPendingDocument = \(json); window.__mdreviewRenderDocument && window.__mdreviewRenderDocument(window.__mdreviewPendingDocument);")
     }
 
     func scrollToHeading(id: String) {
@@ -63,7 +63,8 @@ final class RendererViewController: NSViewController, WKScriptMessageHandler, WK
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any],
-              body["type"] as? String == "outlineChanged",
+              let type = body["type"] as? String else { return }
+        guard type == "outlineChanged",
               let rawItems = body["items"] as? [[String: Any]] else { return }
         let items = rawItems.compactMap { item -> NativeOutlineItem? in
             guard let id = item["id"] as? String,

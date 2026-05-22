@@ -14,10 +14,16 @@ export type RenderDocumentMessage = {
 
 export function RendererApp() {
   const bridge = useMemo(() => createNativeBridge(), []);
-  const [document, setDocument] = useState<RenderDocumentMessage | null>(null);
+  const [document, setDocument] = useState<RenderDocumentMessage | null>(window.__mdreviewPendingDocument ?? null);
 
   useEffect(() => {
-    window.__mdreviewRenderDocument = setDocument;
+    window.__mdreviewRenderDocument = (message) => {
+      window.__mdreviewPendingDocument = message;
+      setDocument(message);
+    };
+    if (window.__mdreviewPendingDocument) {
+      setDocument(window.__mdreviewPendingDocument);
+    }
     return () => {
       delete window.__mdreviewRenderDocument;
     };
@@ -41,5 +47,6 @@ export function RendererApp() {
 declare global {
   interface Window {
     __mdreviewRenderDocument?: (message: RenderDocumentMessage) => void;
+    __mdreviewPendingDocument?: RenderDocumentMessage;
   }
 }
