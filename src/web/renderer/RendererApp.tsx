@@ -34,13 +34,15 @@ export function RendererApp() {
   }, [bridge]);
 
   if (!document) {
-    return <main className="renderer-empty">等待文档...</main>;
+    return <main className="native-reader renderer-empty">等待文档...</main>;
   }
 
   return (
-    <article className="markdown-body">
-      <MarkdownView content={rewriteMarkdownResources(document.content)} onOutline={onOutline} />
-    </article>
+    <main className="native-reader">
+      <article className="markdown-body">
+        <MarkdownView content={rewriteMarkdownResources(document.content)} onOutline={onOutline} />
+      </article>
+    </main>
   );
 }
 

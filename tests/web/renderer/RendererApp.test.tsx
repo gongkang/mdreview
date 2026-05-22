@@ -36,4 +36,19 @@ describe("RendererApp", () => {
 
     expect(await screen.findByRole("heading", { name: "Hello" })).toBeInTheDocument();
   });
+
+  it("scopes the WKWebView renderer with the native reader root class", async () => {
+    window.__mdreviewPendingDocument = {
+      type: "renderDocument",
+      path: "/tmp/README.md",
+      name: "README.md",
+      content: "# Hello"
+    };
+
+    const { container } = render(<RendererApp />);
+
+    expect(await screen.findByRole("heading", { name: "Hello" })).toBeInTheDocument();
+    expect(container.querySelector(".native-reader")).toBeInTheDocument();
+    expect(container.querySelector(".native-reader .markdown-body")).toBeInTheDocument();
+  });
 });
