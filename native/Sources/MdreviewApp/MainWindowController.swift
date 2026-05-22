@@ -12,6 +12,8 @@ final class MainWindowController: NSWindowController {
     var onSelectTab: ((UUID) -> Void)?
     private var currentWorkspaceRoot: URL?
     private var currentWindowModel: WindowModel?
+    private var activeWatcher: FileWatcher?
+    private var settings = SettingsStore.load()
 
     convenience init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -82,6 +84,7 @@ final class MainWindowController: NSWindowController {
         if let active {
             render(tab: active, workspaceRoot: windowModel.workspaceRoot)
         }
+        watch(activeTab: active, workspaceRoot: windowModel.workspaceRoot)
     }
 
     private func render(tab: DocumentTab, workspaceRoot: URL?) {
@@ -107,5 +110,17 @@ final class MainWindowController: NSWindowController {
         guard let windowModel = currentWindowModel,
               let active = windowModel.tabs.first(where: { $0.id == windowModel.activeTabID }) else { return }
         render(tab: active, workspaceRoot: windowModel.workspaceRoot)
+    }
+
+    private func watch(activeTab: DocumentTab?, workspaceRoot: URL?) {
+        activeWatcher?.stop()
+        activeWatcher = nil
+        guard settings.autoRefreshSingleFile, let activeTab else { return }
+        activeWatcher = try? FileWatcher(url: activeTab.url) { [weak self, activeTab, workspaceRoot] in
+            DispatchQueue.main.async {
+                self?.render(tab: activeTab, workspaceRoot: workspaceRoot)
+            }
+        }
+        activeWatcher?.start()
     }
 }
