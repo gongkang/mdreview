@@ -5,7 +5,8 @@ final class MainWindowController: NSWindowController {
     private let splitView = NSSplitView()
     private let tabBar = DocumentTabBar()
     private let sidebar = SidebarController()
-    private let content = NSTextView()
+    private let resourceHandler = ResourceSchemeHandler()
+    private lazy var renderer = RendererViewController(resourceHandler: resourceHandler)
     private var didBuildLayout = false
 
     convenience init() {
@@ -40,14 +41,12 @@ final class MainWindowController: NSWindowController {
         tabBar.view.heightAnchor.constraint(equalToConstant: 34).isActive = true
         splitView.addArrangedSubview(sidebar.filesView)
         splitView.addArrangedSubview(sidebar.outlineView)
-        let contentScrollView = NSScrollView()
-        contentScrollView.documentView = content
-        contentScrollView.hasVerticalScroller = true
-        splitView.addArrangedSubview(contentScrollView)
+        splitView.addArrangedSubview(renderer.view)
+        if let rendererURL = Bundle.main.resourceURL?.appendingPathComponent("renderer/index.html") {
+            renderer.loadRenderer(from: rendererURL)
+        }
         sidebar.filesView.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
         sidebar.outlineView.widthAnchor.constraint(greaterThanOrEqualToConstant: 150).isActive = true
-        content.string = "请选择 Markdown 文件"
-        content.isEditable = false
     }
 
     func apply(windowModel: WindowModel) {
@@ -55,5 +54,19 @@ final class MainWindowController: NSWindowController {
         sidebar.apply(layoutMode: windowModel.layoutMode)
         let active = windowModel.tabs.first(where: { $0.id == windowModel.activeTabID })
         window?.title = active?.title ?? "mdreview"
+        if let active {
+            render(tab: active, workspaceRoot: windowModel.workspaceRoot)
+        }
+    }
+
+    private func render(tab: DocumentTab, workspaceRoot: URL?) {
+        resourceHandler.root = workspaceRoot ?? tab.url.deletingLastPathComponent()
+        resourceHandler.currentDocument = tab.url
+        do {
+            let content = try String(contentsOf: tab.url, encoding: .utf8)
+            renderer.render(path: tab.url.path, name: tab.title, content: content, scrollPosition: tab.scrollPosition)
+        } catch {
+            renderer.render(path: tab.url.path, name: tab.title, content: "文件不存在：\(tab.url.path)", scrollPosition: tab.scrollPosition)
+        }
     }
 }
