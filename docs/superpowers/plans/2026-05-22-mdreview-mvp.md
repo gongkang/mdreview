@@ -115,6 +115,7 @@ Write these baseline files. This step has no failing business test because it es
     "tsup": "^8.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0",
+    "unified": "^11.0.0",
     "vite": "^7.0.0",
     "vitest": "^3.0.0"
   }
@@ -441,7 +442,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { assertInsideRoot } from "../../src/server/path-utils";
-import { listMarkdownFiles, selectDefaultDocument } from "../../src/server/file-tree";
+import { findRootReadme, listMarkdownFiles, selectDefaultDocument } from "../../src/server/file-tree";
 
 async function makeFixture() {
   const root = await mkdtemp(path.join(tmpdir(), "mdreview-"));
@@ -468,6 +469,11 @@ describe("file tree", () => {
     const root = await makeFixture();
     const tree = await listMarkdownFiles(root);
     expect(selectDefaultDocument(tree)).toBe("readme.MD");
+  });
+
+  it("finds a root README without requiring a recursive tree scan", async () => {
+    const root = await makeFixture();
+    await expect(findRootReadme(root)).resolves.toBe("readme.MD");
   });
 
   it("rejects traversal outside the root using real paths", async () => {
@@ -559,6 +565,7 @@ import path from "node:path";
 import type { FileNode } from "../shared/types";
 
 const SKIPPED_DIRECTORIES = new Set([".git", "node_modules", "dist", "build"]);
+const README_ORDER = ["readme.md", "readme.markdown"];
 
 export function isMarkdownPath(filePath: string): boolean {
   const lower = filePath.toLowerCase();
@@ -594,9 +601,18 @@ export function flattenFiles(nodes: FileNode[]): FileNode[] {
   return nodes.flatMap((node) => (node.type === "file" ? [node] : flattenFiles(node.children ?? [])));
 }
 
+export async function findRootReadme(rootPath: string): Promise<string | null> {
+  const entries = await readdir(rootPath, { withFileTypes: true });
+  for (const expected of README_ORDER) {
+    const match = entries.find((entry) => entry.isFile() && entry.name.toLowerCase() === expected);
+    if (match) return match.name;
+  }
+  return null;
+}
+
 export function selectDefaultDocument(nodes: FileNode[]): string | null {
   const files = flattenFiles(nodes);
-  const readme = files.find((file) => /^readme\.(md|markdown)$/i.test(file.path));
+  const readme = files.find((file) => README_ORDER.includes(file.path.toLowerCase()));
   if (readme) return readme.path;
   const first = [...files].sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: "base" }))[0];
   return first?.path ?? null;
@@ -634,7 +650,7 @@ git commit -m "feat: add markdown file discovery"
 
 ```ts
 // tests/server/http-server.test.ts
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -653,6 +669,16 @@ async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), "mdreview-api-"));
   await writeFile(path.join(root, "README.md"), "# Hello");
   return root;
+}
+
+async function staticFixture() {
+  const parent = await mkdtemp(path.join(tmpdir(), "mdreview-static-"));
+  const staticDir = path.join(parent, "client");
+  await mkdir(staticDir);
+  await writeFile(path.join(staticDir, "index.html"), "<main>mdreview</main>");
+  await writeFile(path.join(staticDir, "app.css"), "body { color: black; }");
+  await writeFile(path.join(parent, "secret.css"), "secret");
+  return staticDir;
 }
 
 describe("preview server APIs", () => {
@@ -685,6 +711,17 @@ describe("preview server APIs", () => {
       content: "# Hello"
     });
   });
+
+  it("serves static assets with MIME types and blocks static path traversal", async () => {
+    const session = await createPreviewSession(await fixture());
+    server = await startPreviewServer({ session, staticDir: await staticFixture() });
+
+    const cssResponse = await fetch(`${server.url}/app.css`);
+    expect(cssResponse.headers.get("content-type")).toContain("text/css");
+
+    const escapedResponse = await fetch(`${server.url}/%2e%2e%2fsecret.css`);
+    expect(escapedResponse.status).toBe(403);
+  });
 });
 ```
 
@@ -708,13 +745,13 @@ Cannot find module '../../src/server/http-server'
 ```ts
 // src/server/http-server.ts
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import type { PreviewSession } from "./session";
 import { API_TOKEN_HEADER } from "../shared/security";
 import { apiError } from "../shared/errors";
 import { assertInsideRoot } from "./path-utils";
-import { listMarkdownFiles, selectDefaultDocument } from "./file-tree";
+import { findRootReadme, listMarkdownFiles } from "./file-tree";
 
 export type StartPreviewServerOptions = {
   session: PreviewSession;
@@ -744,6 +781,16 @@ function requireToken(request: IncomingMessage, response: ServerResponse, token:
   return true;
 }
 
+function contentTypeFor(assetPath: string): string {
+  const ext = path.extname(assetPath).toLowerCase();
+  if (ext === ".js") return "text/javascript; charset=utf-8";
+  if (ext === ".css") return "text/css; charset=utf-8";
+  if (ext === ".json") return "application/json; charset=utf-8";
+  if (ext === ".svg") return "image/svg+xml";
+  if (ext === ".woff2") return "font/woff2";
+  return "text/html; charset=utf-8";
+}
+
 async function readDocument(session: PreviewSession, relativePath: string) {
   const realPath = session.mode === "file"
     ? session.rootRealPath
@@ -760,6 +807,21 @@ async function readDocument(session: PreviewSession, relativePath: string) {
 
 export async function startPreviewServer(options: StartPreviewServerOptions): Promise<StartedPreviewServer> {
   const { session, staticDir = path.resolve("dist/client") } = options;
+  const staticRoot = path.resolve(staticDir);
+
+  async function sendStatic(response: ServerResponse, assetPath: string) {
+    const realStaticRoot = await realpath(staticRoot);
+    const realFile = await realpath(path.resolve(staticRoot, assetPath));
+    const relative = path.relative(realStaticRoot, realFile);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      response.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
+      response.end("Forbidden");
+      return;
+    }
+    const body = await readFile(realFile);
+    response.writeHead(200, { "content-type": contentTypeFor(assetPath) });
+    response.end(body);
+  }
 
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -768,11 +830,10 @@ export async function startPreviewServer(options: StartPreviewServerOptions): Pr
       if (!requireToken(request, response, session.token)) return;
       try {
         if (url.pathname === "/api/session") {
-          const tree = session.mode === "directory" ? await listMarkdownFiles(session.rootRealPath) : [];
           sendJson(response, 200, {
             mode: session.mode,
             rootName: session.rootName,
-            defaultDocument: session.mode === "directory" ? selectDefaultDocument(tree) : path.basename(session.rootPath)
+            defaultDocument: session.mode === "directory" ? await findRootReadme(session.rootRealPath) : path.basename(session.rootPath)
           });
           return;
         }
@@ -792,15 +853,10 @@ export async function startPreviewServer(options: StartPreviewServerOptions): Pr
     }
 
     const assetPath = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
-    const filePath = path.join(staticDir, assetPath);
     try {
-      const body = await readFile(filePath);
-      response.writeHead(200, { "content-type": assetPath.endsWith(".js") ? "text/javascript" : "text/html" });
-      response.end(body);
+      await sendStatic(response, decodeURIComponent(assetPath));
     } catch {
-      const body = await readFile(path.join(staticDir, "index.html"));
-      response.writeHead(200, { "content-type": "text/html" });
-      response.end(body);
+      await sendStatic(response, "index.html");
     }
   });
 
@@ -857,6 +913,7 @@ import { parseArgs } from "../../src/cli/args";
 describe("parseArgs", () => {
   it("parses path, port, and no-open", () => {
     expect(parseArgs(["README.md", "--port", "4010", "--no-open"])).toEqual({
+      action: "serve",
       path: "README.md",
       port: 4010,
       openBrowser: false
@@ -865,10 +922,16 @@ describe("parseArgs", () => {
 
   it("defaults to opening the browser", () => {
     expect(parseArgs(["docs"])).toEqual({
+      action: "serve",
       path: "docs",
       port: undefined,
       openBrowser: true
     });
+  });
+
+  it("returns help and version actions without requiring a path", () => {
+    expect(parseArgs(["--help"])).toEqual({ action: "help" });
+    expect(parseArgs(["--version"])).toEqual({ action: "version" });
   });
 
   it("rejects missing path", () => {
@@ -897,14 +960,25 @@ Cannot find module '../../src/cli/args'
 ```ts
 // src/cli/args.ts
 export type CliOptions = {
+  action: "serve";
   path: string;
   port?: number;
   openBrowser: boolean;
+} | {
+  action: "help";
+} | {
+  action: "version";
 };
+
+export const HELP_TEXT = "Usage: mdreview <file-or-directory> [--port <number>] [--no-open]";
+export const VERSION = "0.1.0";
 
 export function parseArgs(argv: string[]): CliOptions {
   if (argv.includes("--help")) {
-    throw new Error("Usage: mdreview <file-or-directory> [--port <number>] [--no-open]");
+    return { action: "help" };
+  }
+  if (argv.includes("--version")) {
+    return { action: "version" };
   }
 
   let inputPath: string | undefined;
@@ -932,7 +1006,7 @@ export function parseArgs(argv: string[]): CliOptions {
   }
 
   if (!inputPath) throw new Error("Usage: mdreview <file-or-directory>");
-  return { path: inputPath, port, openBrowser };
+  return { action: "serve", path: inputPath, port, openBrowser };
 }
 ```
 
@@ -940,13 +1014,21 @@ export function parseArgs(argv: string[]): CliOptions {
 // src/cli/index.ts
 #!/usr/bin/env node
 import open from "open";
-import { parseArgs } from "./args";
+import { HELP_TEXT, VERSION, parseArgs } from "./args";
 import { createPreviewSession } from "../server/session";
 import { startPreviewServer } from "../server/http-server";
 
 async function main() {
   try {
     const options = parseArgs(process.argv.slice(2));
+    if (options.action === "help") {
+      console.log(HELP_TEXT);
+      return;
+    }
+    if (options.action === "version") {
+      console.log(VERSION);
+      return;
+    }
     const session = await createPreviewSession(options.path);
     const server = await startPreviewServer({ session, port: options.port });
     const url = `${server.url}/#token=${session.token}`;
@@ -1194,6 +1276,15 @@ function extractOutline(content: string): OutlineItem[] {
     }));
 }
 
+function firstMarkdownPath(nodes: FileNode[]): string | null {
+  for (const node of nodes) {
+    if (node.type === "file") return node.path;
+    const childPath = firstMarkdownPath(node.children ?? []);
+    if (childPath) return childPath;
+  }
+  return null;
+}
+
 export function App() {
   const token = readTokenFromLocation();
   const client = useMemo(() => (token ? new ApiClient(token) : null), [token]);
@@ -1207,8 +1298,13 @@ export function App() {
     client.session()
       .then(async (nextSession) => {
         setSession(nextSession);
-        if (nextSession.mode === "directory") setFiles(await client.files());
-        if (nextSession.defaultDocument) setDocument(await client.document(nextSession.defaultDocument));
+        let loadedFiles: FileNode[] = [];
+        if (nextSession.mode === "directory") {
+          loadedFiles = await client.files();
+          setFiles(loadedFiles);
+        }
+        const defaultPath = nextSession.defaultDocument ?? firstMarkdownPath(loadedFiles);
+        if (defaultPath) setDocument(await client.document(defaultPath));
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
   }, [client]);
@@ -1537,12 +1633,13 @@ export function containsMath(content: string): boolean {
 // src/web/components/MarkdownView.tsx additions
 // update the existing React import to include useState
 import { useEffect, useMemo, useState } from "react";
+import type { PluggableList } from "unified";
 import { containsMath, containsMermaid } from "../markdown/detect";
 import "katex/dist/katex.min.css";
 
 type DynamicPlugins = {
-  remarkMath?: unknown;
-  rehypeKatex?: unknown;
+  remarkMath?: PluggableList[number];
+  rehypeKatex?: PluggableList[number];
 };
 
 function MermaidBlock({ code }: { code: string }) {
@@ -1583,8 +1680,8 @@ useEffect(() => {
   };
 }, [content]);
 
-const remarkPlugins = dynamicPlugins.remarkMath ? [remarkGfm, dynamicPlugins.remarkMath] : [remarkGfm];
-const rehypePlugins = dynamicPlugins.rehypeKatex
+const remarkPlugins: PluggableList = dynamicPlugins.remarkMath ? [remarkGfm, dynamicPlugins.remarkMath] : [remarkGfm];
+const rehypePlugins: PluggableList = dynamicPlugins.rehypeKatex
   ? [rehypeRaw, [rehypeSanitize, markdownSanitizeSchema], rehypeHighlight, dynamicPlugins.rehypeKatex]
   : [rehypeRaw, [rehypeSanitize, markdownSanitizeSchema], rehypeHighlight];
 
@@ -1592,6 +1689,9 @@ const rehypePlugins = dynamicPlugins.rehypeKatex
 remarkPlugins={remarkPlugins}
 rehypePlugins={rehypePlugins}
 components={{
+  h1: ({ children }) => <h1 id={slugify(String(children))}>{children}</h1>,
+  h2: ({ children }) => <h2 id={slugify(String(children))}>{children}</h2>,
+  h3: ({ children }) => <h3 id={slugify(String(children))}>{children}</h3>,
   code({ className, children }) {
     const code = String(children).replace(/\n$/, "");
     if (/language-mermaid/i.test(className ?? "") && containsMermaid(`\`\`\`mermaid\n${code}\n\`\`\``)) {
@@ -1746,8 +1846,17 @@ if (url.pathname === "/api/events") {
   return;
 }
 
-// inside close()
-await watcher?.close();
+// replace the returned close implementation with this body
+close: async () => {
+  for (const client of eventClients) {
+    client.end();
+  }
+  eventClients.clear();
+  await watcher?.close();
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
 ```
 
 - [ ] **Step 5: Add browser event subscription**
@@ -1989,7 +2098,7 @@ PASS tests/web/ErrorView.test.tsx
 
 - [ ] **Step 3: Add README usage**
 
-```markdown
+~~~markdown
 # mdreview
 
 Lightweight local Markdown previewer.
@@ -2006,7 +2115,7 @@ mdreview docs --port 4010
 Single-file mode hides the file tree and refreshes automatically when the file changes. Directory mode shows Markdown files, the rendered document, and an outline.
 
 The local server binds to `127.0.0.1` and protects file APIs with a per-session token.
-```
+~~~
 
 - [ ] **Step 4: Run full verification**
 
