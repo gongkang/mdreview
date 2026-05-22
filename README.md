@@ -10,6 +10,14 @@ MDREVIEW_APP_PATH="$PWD/native/dist/mdreview.app" node dist/node/index.js README
 MDREVIEW_APP_PATH="$PWD/native/dist/mdreview.app" node dist/node/index.js docs --new-window
 ```
 
+本机安装后可以直接使用 `mdreview` 命令：
+
+```bash
+npm run install:local
+mdreview README.md
+mdreview docs --new-window
+```
+
 CLI 入口负责把打开请求交给原生 App，体验类似 Sublime Text 的 `subl` 命令。安装到 PATH 后可以直接运行：
 
 ```bash

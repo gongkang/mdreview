@@ -2,14 +2,12 @@
 import { spawn } from "node:child_process";
 import { rm, stat } from "node:fs/promises";
 import path from "node:path";
+import { resolveAppLaunchArgs } from "./app-launch";
 import { HELP_TEXT, VERSION, parseArgs } from "./args";
 import { defaultSocketPath, sendOpenRequest, type NativeOpenRequest } from "./native-client";
 
 async function launchApp() {
-  const explicitApp = process.env.MDREVIEW_APP_PATH;
-  const child = explicitApp
-    ? spawn("open", [explicitApp], { stdio: "ignore", detached: true })
-    : spawn("open", ["-a", "mdreview"], { stdio: "ignore", detached: true });
+  const child = spawn("open", await resolveAppLaunchArgs(), { stdio: "ignore", detached: true });
   child.unref();
 }
 

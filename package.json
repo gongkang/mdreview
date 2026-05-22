@@ -13,6 +13,7 @@
     "build": "npm run build:web && npm run build:node",
     "build:native": "DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer} xcrun swift build --package-path native",
     "build:app": "npm run build && npm run build:native && node scripts/package-macos-app.mjs",
+    "install:local": "npm run build:app && node scripts/install-local.mjs",
     "test": "vitest run",
     "test:native": "DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer} xcrun swift test --package-path native",
     "test:all": "npm run typecheck && npm test && npm run test:native",
