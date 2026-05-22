@@ -1,22 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { parseArgs } from "../../src/cli/args";
+import { HELP_TEXT, parseArgs } from "../../src/cli/args";
 
 describe("parseArgs", () => {
-  it("parses path, port, and no-open", () => {
-    expect(parseArgs(["README.md", "--port", "4010", "--no-open"])).toEqual({
-      action: "serve",
-      path: "README.md",
-      port: 4010,
-      openBrowser: false
+  it("parses file path and new-window", () => {
+    expect(parseArgs(["docs", "--new-window"])).toEqual({
+      action: "open",
+      path: "docs",
+      newWindow: true
     });
   });
 
-  it("defaults to opening the browser", () => {
-    expect(parseArgs(["docs"])).toEqual({
-      action: "serve",
-      path: "docs",
-      port: undefined,
-      openBrowser: true
+  it("defaults to reusing an existing window", () => {
+    expect(parseArgs(["README.md"])).toEqual({
+      action: "open",
+      path: "README.md",
+      newWindow: false
     });
   });
 
@@ -25,7 +23,12 @@ describe("parseArgs", () => {
     expect(parseArgs(["--version"])).toEqual({ action: "version" });
   });
 
-  it("rejects missing path", () => {
-    expect(() => parseArgs([])).toThrow("Usage: mdreview <file-or-directory>");
+  it("rejects removed browser-server flags", () => {
+    expect(() => parseArgs(["docs", "--port", "4010"])).toThrow("不再支持参数：--port");
+    expect(() => parseArgs(["docs", "--no-open"])).toThrow("不再支持参数：--no-open");
+  });
+
+  it("prints Chinese help text", () => {
+    expect(HELP_TEXT).toContain("用法：mdreview <文件或目录>");
   });
 });

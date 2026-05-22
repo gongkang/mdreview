@@ -1,8 +1,32 @@
 #!/usr/bin/env node
-import open from "open";
+import { spawn } from "node:child_process";
+import { rm, stat } from "node:fs/promises";
+import path from "node:path";
 import { HELP_TEXT, VERSION, parseArgs } from "./args";
-import { startPreviewServer } from "../server/http-server";
-import { createPreviewSession } from "../server/session";
+import { defaultSocketPath, sendOpenRequest, type NativeOpenRequest } from "./native-client";
+
+async function launchApp() {
+  const explicitApp = process.env.MDREVIEW_APP_PATH;
+  const child = explicitApp
+    ? spawn("open", [explicitApp], { stdio: "ignore", detached: true })
+    : spawn("open", ["-a", "mdreview"], { stdio: "ignore", detached: true });
+  child.unref();
+}
+
+async function waitForApp(socketPath: string, request: NativeOpenRequest) {
+  const started = Date.now();
+  let lastError: unknown;
+  while (Date.now() - started < 5_000) {
+    try {
+      return await sendOpenRequest(socketPath, request, 2_000);
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+  }
+  const detail = lastError instanceof Error ? lastError.message : "未知错误";
+  throw new Error(`无法连接 mdreview App，请确认已安装 App 或设置 MDREVIEW_APP_PATH：${detail}`);
+}
 
 async function main() {
   try {
@@ -15,15 +39,35 @@ async function main() {
       console.log(VERSION);
       return;
     }
-    const session = await createPreviewSession(options.path);
-    const server = await startPreviewServer({ session, port: options.port });
-    const url = `${server.url}/#token=${session.token}`;
-    console.log(`mdreview preview: ${url}`);
-    if (options.openBrowser) {
-      await open(url).catch(() => {
-        console.warn(`Could not open browser automatically. Open this URL manually: ${url}`);
-      });
+
+    const absolutePath = path.resolve(options.path);
+    const stats = await stat(absolutePath).catch(() => {
+      throw new Error(`路径不存在：${options.path}`);
+    });
+    if (!stats.isFile() && !stats.isDirectory()) {
+      throw new Error(`路径不是文件或目录：${options.path}`);
     }
+
+    const request: NativeOpenRequest = {
+      kind: stats.isDirectory() ? "openDirectory" : "openFile",
+      path: absolutePath,
+      newWindow: options.newWindow
+    };
+    const socketPath = defaultSocketPath();
+
+    let response;
+    try {
+      response = await sendOpenRequest(socketPath, request, 2_000);
+    } catch {
+      await rm(socketPath, { force: true }).catch(() => undefined);
+      await launchApp();
+      response = await waitForApp(socketPath, request);
+    }
+
+    if (!response.accepted) {
+      throw new Error(response.message);
+    }
+    console.log(response.message);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
