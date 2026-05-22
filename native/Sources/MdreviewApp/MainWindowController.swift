@@ -14,6 +14,8 @@ final class MainWindowController: NSWindowController {
     private var currentWindowModel: WindowModel?
     private var activeWatcher: FileWatcher?
     private var settings = SettingsStore.load()
+    private var filesWidthConstraint: NSLayoutConstraint?
+    private var outlineWidthConstraint: NSLayoutConstraint?
 
     convenience init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -31,28 +33,37 @@ final class MainWindowController: NSWindowController {
         guard !didBuildLayout else { return }
         guard let root = window?.contentView else { return }
         didBuildLayout = true
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.spacing = 0
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(stack)
+        tabBar.view.translatesAutoresizingMaskIntoConstraints = false
+        splitView.translatesAutoresizingMaskIntoConstraints = false
+        splitView.isVertical = true
+        root.addSubview(tabBar.view)
+        root.addSubview(splitView)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: root.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+            tabBar.view.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            tabBar.view.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            tabBar.view.topAnchor.constraint(equalTo: root.topAnchor),
+            tabBar.view.heightAnchor.constraint(equalToConstant: 34),
+            splitView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            splitView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            splitView.topAnchor.constraint(equalTo: tabBar.view.bottomAnchor),
+            splitView.bottomAnchor.constraint(equalTo: root.bottomAnchor)
         ])
-        stack.addArrangedSubview(tabBar.view)
-        stack.addArrangedSubview(splitView)
-        tabBar.view.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        sidebar.filesView.translatesAutoresizingMaskIntoConstraints = false
+        sidebar.outlineView.translatesAutoresizingMaskIntoConstraints = false
+        renderer.view.translatesAutoresizingMaskIntoConstraints = false
         splitView.addArrangedSubview(sidebar.filesView)
         splitView.addArrangedSubview(sidebar.outlineView)
         splitView.addArrangedSubview(renderer.view)
         if let rendererURL = Bundle.main.resourceURL?.appendingPathComponent("renderer/index.html") {
             renderer.loadRenderer(from: rendererURL)
         }
-        sidebar.filesView.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
-        sidebar.outlineView.widthAnchor.constraint(greaterThanOrEqualToConstant: 150).isActive = true
+        filesWidthConstraint = sidebar.filesView.widthAnchor.constraint(equalToConstant: CGFloat(settings.filesWidth))
+        outlineWidthConstraint = sidebar.outlineView.widthAnchor.constraint(equalToConstant: CGFloat(settings.outlineWidth))
+        filesWidthConstraint?.priority = .defaultHigh
+        outlineWidthConstraint?.priority = .defaultHigh
+        let rendererMinimumWidth = renderer.view.widthAnchor.constraint(greaterThanOrEqualToConstant: 320)
+        rendererMinimumWidth.priority = .defaultHigh
+        NSLayoutConstraint.activate([filesWidthConstraint, outlineWidthConstraint, rendererMinimumWidth].compactMap { $0 })
         sidebar.onSelectFile = { [weak self] relativePath in
             guard let self, let root = self.currentWorkspaceRoot else { return }
             self.onOpenWorkspaceFile?(root.appendingPathComponent(relativePath))
@@ -73,6 +84,7 @@ final class MainWindowController: NSWindowController {
         currentWorkspaceRoot = windowModel.workspaceRoot
         tabBar.render(tabs: windowModel.tabs, activeTabID: windowModel.activeTabID)
         sidebar.apply(layoutMode: windowModel.layoutMode)
+        applySidebarWidths(layoutMode: windowModel.layoutMode)
         let active = windowModel.tabs.first(where: { $0.id == windowModel.activeTabID })
         let activeRelativePath = active.flatMap { tab -> String? in
             guard let root = windowModel.workspaceRoot else { return nil }
@@ -85,6 +97,11 @@ final class MainWindowController: NSWindowController {
             render(tab: active, workspaceRoot: windowModel.workspaceRoot)
         }
         watch(activeTab: active, workspaceRoot: windowModel.workspaceRoot)
+    }
+
+    private func applySidebarWidths(layoutMode: LayoutMode) {
+        filesWidthConstraint?.constant = layoutMode == .outlineAndDocument ? 0 : CGFloat(settings.filesWidth)
+        outlineWidthConstraint?.constant = CGFloat(settings.outlineWidth)
     }
 
     private func render(tab: DocumentTab, workspaceRoot: URL?) {

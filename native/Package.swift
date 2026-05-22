@@ -13,6 +13,7 @@ let package = Package(
         .target(name: "MdreviewCore"),
         .target(name: "MdreviewIPC", dependencies: ["MdreviewCore"]),
         .executableTarget(name: "MdreviewApp", dependencies: ["MdreviewCore", "MdreviewIPC"]),
+        .testTarget(name: "MdreviewAppTests", dependencies: ["MdreviewApp", "MdreviewCore"]),
         .testTarget(name: "MdreviewCoreTests", dependencies: ["MdreviewCore"]),
         .testTarget(name: "MdreviewIPCTests", dependencies: ["MdreviewCore", "MdreviewIPC"])
     ]
