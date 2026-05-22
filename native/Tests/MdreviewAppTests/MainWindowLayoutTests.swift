@@ -151,6 +151,27 @@ final class MainWindowLayoutTests: XCTestCase {
         XCTAssertEqual(advancedLabel.tag, 1)
     }
 
+    func testDocumentTabsUseLowChromeTextButtons() {
+        let controller = MainWindowController()
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let first = DocumentTab(url: URL(fileURLWithPath: "/tmp/README.md"))
+        let second = DocumentTab(url: URL(fileURLWithPath: "/tmp/Guide.md"))
+        controller.apply(windowModel: WindowModel(tabs: [first, second], activeTabID: second.id, layoutMode: .outlineAndDocument))
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let tabs = findSubviews(ofType: DocumentTabButton.self, in: controller.window?.contentView)
+        let active = tabs.first { $0.title == "Guide.md" }
+        let inactive = tabs.first { $0.title == "README.md" }
+
+        XCTAssertEqual(tabs.count, 2)
+        XCTAssertFalse(active?.isBordered ?? true)
+        XCTAssertEqual(active?.bezelStyle, .regularSquare)
+        XCTAssertEqual(active?.isActive, true)
+        XCTAssertEqual(inactive?.isActive, false)
+    }
+
     private func findSubview<T: NSView>(ofType type: T.Type, in view: NSView?) -> T? {
         guard let view else { return nil }
         if let match = view as? T { return match }

@@ -20,9 +20,13 @@ final class DocumentTabBar: NSObject {
             subview.removeFromSuperview()
         }
         for tab in tabs {
-            let button = NSButton(title: tab.title, target: self, action: #selector(selectTab(_:)))
-            button.identifier = NSUserInterfaceItemIdentifier(tab.id.uuidString)
-            button.bezelStyle = tab.id == activeTabID ? .rounded : .texturedRounded
+            let button = DocumentTabButton(
+                title: tab.title,
+                identifier: tab.id.uuidString,
+                isActive: tab.id == activeTabID,
+                target: self,
+                action: #selector(selectTab(_:))
+            )
             view.addArrangedSubview(button)
         }
         if tabs.isEmpty {
@@ -30,7 +34,7 @@ final class DocumentTabBar: NSObject {
         }
     }
 
-    @objc private func selectTab(_ sender: NSButton) {
+    @objc private func selectTab(_ sender: DocumentTabButton) {
         guard let raw = sender.identifier?.rawValue, let id = UUID(uuidString: raw) else { return }
         onSelectTab?(id)
     }
