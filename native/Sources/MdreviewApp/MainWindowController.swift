@@ -8,6 +8,10 @@ final class MainWindowController: NSWindowController {
     private let resourceHandler = ResourceSchemeHandler()
     private lazy var renderer = RendererViewController(resourceHandler: resourceHandler)
     private var didBuildLayout = false
+    var onOpenWorkspaceFile: ((URL) -> Void)?
+    var onSelectTab: ((UUID) -> Void)?
+    private var currentWorkspaceRoot: URL?
+    private var currentWindowModel: WindowModel?
 
     convenience init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -47,12 +51,33 @@ final class MainWindowController: NSWindowController {
         }
         sidebar.filesView.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
         sidebar.outlineView.widthAnchor.constraint(greaterThanOrEqualToConstant: 150).isActive = true
+        sidebar.onSelectFile = { [weak self] relativePath in
+            guard let self, let root = self.currentWorkspaceRoot else { return }
+            self.onOpenWorkspaceFile?(root.appendingPathComponent(relativePath))
+        }
+        sidebar.onSelectHeading = { [weak self] id in
+            self?.renderer.scrollToHeading(id: id)
+        }
+        renderer.onOutlineChanged = { [weak self] items in
+            self?.sidebar.renderOutline(items)
+        }
+        tabBar.onSelectTab = { [weak self] tabID in
+            self?.onSelectTab?(tabID)
+        }
     }
 
     func apply(windowModel: WindowModel) {
+        currentWindowModel = windowModel
+        currentWorkspaceRoot = windowModel.workspaceRoot
         tabBar.render(tabs: windowModel.tabs, activeTabID: windowModel.activeTabID)
         sidebar.apply(layoutMode: windowModel.layoutMode)
         let active = windowModel.tabs.first(where: { $0.id == windowModel.activeTabID })
+        let activeRelativePath = active.flatMap { tab -> String? in
+            guard let root = windowModel.workspaceRoot else { return nil }
+            let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+            return tab.url.path.hasPrefix(prefix) ? String(tab.url.path.dropFirst(prefix.count)) : nil
+        }
+        sidebar.renderFiles(nodes: windowModel.fileTree, activePath: activeRelativePath)
         window?.title = active?.title ?? "mdreview"
         if let active {
             render(tab: active, workspaceRoot: windowModel.workspaceRoot)
@@ -68,5 +93,19 @@ final class MainWindowController: NSWindowController {
         } catch {
             renderer.render(path: tab.url.path, name: tab.title, content: "文件不存在：\(tab.url.path)", scrollPosition: tab.scrollPosition)
         }
+    }
+
+    func toggleFiles() {
+        sidebar.toggleFiles()
+    }
+
+    func toggleOutline() {
+        sidebar.toggleOutline()
+    }
+
+    func reloadDocument() {
+        guard let windowModel = currentWindowModel,
+              let active = windowModel.tabs.first(where: { $0.id == windowModel.activeTabID }) else { return }
+        render(tab: active, workspaceRoot: windowModel.workspaceRoot)
     }
 }

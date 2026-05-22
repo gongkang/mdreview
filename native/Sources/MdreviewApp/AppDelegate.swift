@@ -24,6 +24,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func createWindow(activate: Bool) {
         let controller = MainWindowController()
+        controller.onOpenWorkspaceFile = { [weak self] url in
+            _ = self?.handleOpenRequest(OpenRequest(kind: .openFile, path: url.path, newWindow: false))
+        }
+        controller.onSelectTab = { [weak self, weak controller] tabID in
+            guard let self, let controller,
+                  let index = self.windows.firstIndex(where: { $0 === controller }),
+                  self.model.windows.indices.contains(index) else { return }
+            self.model.windows[index].activeTabID = tabID
+            self.model.activeWindowID = self.model.windows[index].id
+            self.synchronizeWindows()
+        }
         windows.append(controller)
         controller.showWindow(nil)
         if activate {
@@ -170,8 +181,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func closeTab() {}
-    @objc private func toggleFiles() {}
-    @objc private func toggleOutline() {}
-    @objc private func reloadDocument() {}
+    @objc private func closeTab() {
+        guard let index = activeWindowIndex(),
+              let activeTabID = model.windows[index].activeTabID else { return }
+        model.windows[index].tabs.removeAll { $0.id == activeTabID }
+        model.windows[index].activeTabID = model.windows[index].tabs.last?.id
+        synchronizeWindows()
+    }
+
+    @objc private func toggleFiles() {
+        activeController()?.toggleFiles()
+    }
+
+    @objc private func toggleOutline() {
+        activeController()?.toggleOutline()
+    }
+
+    @objc private func reloadDocument() {
+        activeController()?.reloadDocument()
+    }
+
+    private func activeWindowIndex() -> Array<WindowModel>.Index? {
+        guard let id = model.activeWindowID else { return nil }
+        return model.windows.firstIndex(where: { $0.id == id })
+    }
+
+    private func activeController() -> MainWindowController? {
+        if let key = windows.first(where: { $0.window?.isKeyWindow == true }) {
+            return key
+        }
+        guard let activeID = model.activeWindowID,
+              let index = model.windows.firstIndex(where: { $0.id == activeID }) else { return windows.last }
+        return windows.indices.contains(index) ? windows[index] : windows.last
+    }
 }
