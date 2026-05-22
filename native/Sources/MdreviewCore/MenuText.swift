@@ -1,0 +1,15 @@
+public enum MenuText {
+    public static let appName = "mdreview"
+    public static let settings = "设置..."
+    public static let file = "文件"
+    public static let openFile = "打开文件..."
+    public static let openFolder = "打开文件夹..."
+    public static let openFolderInNewWindow = "在新窗口中打开文件夹..."
+    public static let closeTab = "关闭标签页"
+    public static let closeWindow = "关闭窗口"
+    public static let view = "视图"
+    public static let toggleFiles = "显示/隐藏文件"
+    public static let toggleOutline = "显示/隐藏大纲"
+    public static let reloadCurrentDocument = "重新载入当前文档"
+    public static let window = "窗口"
+}

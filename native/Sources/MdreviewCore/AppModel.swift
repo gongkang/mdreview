@@ -1,11 +1,11 @@
 import Foundation
 
-public enum LayoutMode: String, Codable, Equatable {
+public enum LayoutMode: String, Codable, Equatable, Sendable {
     case filesOutlineAndDocument
     case outlineAndDocument
 }
 
-public struct DocumentTab: Codable, Equatable, Identifiable {
+public struct DocumentTab: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public let url: URL
     public var title: String
@@ -19,7 +19,7 @@ public struct DocumentTab: Codable, Equatable, Identifiable {
     }
 }
 
-public struct WindowModel: Codable, Equatable, Identifiable {
+public struct WindowModel: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public var workspaceRoot: URL?
     public var fileTree: [MarkdownNode]
@@ -37,7 +37,7 @@ public struct WindowModel: Codable, Equatable, Identifiable {
     }
 }
 
-public struct AppModel: Codable, Equatable {
+public struct AppModel: Codable, Equatable, Sendable {
     public var windows: [WindowModel]
     public var activeWindowID: UUID?
 

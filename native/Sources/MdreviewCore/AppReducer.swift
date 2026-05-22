@@ -1,11 +1,11 @@
 import Foundation
 
-public enum AppCommand {
+public enum AppCommand: Sendable {
     case openFile(URL, newWindow: Bool)
     case openDirectory(URL, defaultDocument: URL, fileTree: [MarkdownNode], newWindow: Bool)
 }
 
-public enum ReducerResult: Equatable {
+public enum ReducerResult: Equatable, Sendable {
     case opened
     case focused
 }

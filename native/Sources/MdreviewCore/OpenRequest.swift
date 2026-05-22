@@ -1,11 +1,11 @@
 import Foundation
 
-public enum OpenRequestKind: String, Codable, Equatable {
+public enum OpenRequestKind: String, Codable, Equatable, Sendable {
     case openFile
     case openDirectory
 }
 
-public struct OpenRequest: Codable, Equatable {
+public struct OpenRequest: Codable, Equatable, Sendable {
     public let kind: OpenRequestKind
     public let path: String
     public let newWindow: Bool
@@ -17,13 +17,13 @@ public struct OpenRequest: Codable, Equatable {
     }
 }
 
-public enum OpenResponseAction: String, Codable, Equatable {
+public enum OpenResponseAction: String, Codable, Equatable, Sendable {
     case opened
     case focused
     case rejected
 }
 
-public struct OpenResponse: Codable, Equatable {
+public struct OpenResponse: Codable, Equatable, Sendable {
     public let accepted: Bool
     public let action: OpenResponseAction
     public let message: String

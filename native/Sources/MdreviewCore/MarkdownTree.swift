@@ -1,7 +1,7 @@
 import Foundation
 
-public struct MarkdownNode: Codable, Equatable, CustomStringConvertible {
-    public enum NodeType: String, Codable { case file, directory }
+public struct MarkdownNode: Codable, Equatable, CustomStringConvertible, Sendable {
+    public enum NodeType: String, Codable, Sendable { case file, directory }
 
     public let type: NodeType
     public let name: String
