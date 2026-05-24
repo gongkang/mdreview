@@ -9,6 +9,9 @@ Improve the native macOS window layout for Markdown preview:
 - Default column sizing is proportional to the current window width.
 - Column dividers are draggable.
 - Dragged widths apply only to the current window and are not persisted.
+- New main document windows open maximized to the current screen's usable area.
+- The Settings window opens centered.
+- The app menu includes a Chinese Quit command below Settings.
 
 This spec does not change Markdown parsing, rendering fidelity, file watching, tab behavior, or command-line arguments.
 
@@ -17,6 +20,8 @@ This spec does not change Markdown parsing, rendering fidelity, file watching, t
 The native app already uses an `NSSplitView`, but the file list and outline widths are controlled by fixed width constraints from settings. That makes the initial proportions feel cramped and can prevent normal divider dragging because Auto Layout keeps pushing the sidebars back to their configured constants.
 
 The settings page also exposes default file and outline widths. Those pixel settings conflict with the new desired behavior: a predictable default ratio that adapts to the window width.
+
+There are also small native window polish gaps: document windows currently open at a fixed size instead of maximizing, the Settings window should be positioned predictably in the center, and the app menu has Settings but no Quit item below it.
 
 ## Approved Defaults
 
@@ -32,6 +37,21 @@ Single-file mode default ratio:
 - Document area: `84%`
 
 These ratios are applied when a window first receives a folder or file layout. The document area remains the primary region and should get most of the width.
+
+## Window Defaults
+
+New main document windows should open maximized, not in macOS full-screen mode.
+
+- Use the current or main screen's visible frame so the window fills the usable desktop area while keeping the normal title bar, menu bar, and Dock behavior.
+- Do not call native full-screen APIs such as `toggleFullScreen`.
+- The maximized frame is only the initial window frame. Users can resize the window afterward.
+- This applies to windows created from the CLI, file/folder menu actions, and "open in new window" behavior.
+
+The Settings window should open centered.
+
+- Prefer centering relative to the active main window when there is one.
+- Fall back to centering on the current or main screen.
+- The Settings window remains a normal titled utility window, not full-screen and not maximized.
 
 ## Dragging Behavior
 
@@ -65,6 +85,13 @@ For implementation compatibility, the existing settings fields can remain in `Ap
 
 Existing visibility actions such as showing or hiding the file list and outline remain separate from the default ratio behavior.
 
+The app menu should include a Quit item below Settings:
+
+- Label: `退出 mdreview`
+- Shortcut: `Command+Q`
+- Action: terminate the app through `NSApplication.terminate(_:)`.
+- Placement: in the app menu, below `设置...`; a standard separator may be used between Settings and Quit if it matches macOS menu conventions.
+
 ## Data Flow
 
 1. The app opens a file or folder and produces a `WindowModel`.
@@ -90,6 +117,9 @@ Native layout tests should cover:
 - Single-file mode hides the file list and starts with outline/document widths near `16 / 84`.
 - Programmatic divider movement is not immediately reset by fixed width constraints.
 - Settings width values do not affect the default split positions.
+- New main windows initialize to the screen's visible frame without entering macOS full-screen mode.
+- The Settings window is centered when shown.
+- The app menu contains `退出 mdreview` below `设置...` and the item targets app termination.
 - Existing sidebar row rendering, outline selection, and tab tests continue to pass.
 
 Manual verification should cover:
@@ -98,3 +128,6 @@ Manual verification should cover:
 - Open `mdreview README.md --new-window` and drag the outline/document divider.
 - Close and reopen to confirm dragged widths are not persisted.
 - Confirm the Settings window no longer suggests pixel sidebar defaults are active.
+- Open a new document window and confirm it is maximized but not macOS full-screen.
+- Open Settings and confirm the dialog is centered.
+- Use `mdreview > 退出 mdreview` or `Command+Q` to confirm the app quits.
