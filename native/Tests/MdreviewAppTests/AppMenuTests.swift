@@ -19,4 +19,18 @@ final class AppMenuTests: XCTestCase {
         XCTAssertEqual(quit.action, #selector(NSApplication.terminate(_:)))
         XCTAssertTrue(try XCTUnwrap(quit.target as AnyObject?) === NSApplication.shared)
     }
+
+    func testViewMenuUsesSidebarToggleActions() throws {
+        let delegate = AppDelegate()
+        let menu = delegate.buildMenu()
+        let viewMenu = try XCTUnwrap(menu.items.compactMap(\.submenu).first { $0.title == MenuText.view })
+
+        let filesItem = try XCTUnwrap(viewMenu.item(withTitle: MenuText.toggleFiles))
+        let outlineItem = try XCTUnwrap(viewMenu.item(withTitle: MenuText.toggleOutline))
+
+        XCTAssertEqual(NSStringFromSelector(try XCTUnwrap(filesItem.action)), "toggleFiles")
+        XCTAssertEqual(NSStringFromSelector(try XCTUnwrap(outlineItem.action)), "toggleOutline")
+        XCTAssertTrue(try XCTUnwrap(filesItem.target as AnyObject?) === delegate)
+        XCTAssertTrue(try XCTUnwrap(outlineItem.target as AnyObject?) === delegate)
+    }
 }
