@@ -1,6 +1,7 @@
 public enum MenuText {
     public static let appName = "mdreview"
     public static let settings = "设置..."
+    public static let quit = "退出 mdreview"
     public static let file = "文件"
     public static let openFile = "打开文件..."
     public static let openFolder = "打开文件夹..."

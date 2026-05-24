@@ -121,11 +121,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func buildMenu() -> NSMenu {
+    func buildMenu() -> NSMenu {
         let main = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu(title: MenuText.appName)
         appMenu.addItem(menuItem(title: MenuText.settings, action: #selector(openSettings), keyEquivalent: ","))
+        appMenu.addItem(.separator())
+        let quitItem = NSMenuItem(title: MenuText.quit, action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quitItem.target = NSApplication.shared
+        appMenu.addItem(quitItem)
         appItem.submenu = appMenu
         main.addItem(appItem)
 
