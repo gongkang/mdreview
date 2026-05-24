@@ -159,7 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() {
-        SettingsWindowController.shared.showWindow(nil)
+        SettingsWindowController.shared.showCentered(relativeTo: activeController()?.window)
     }
 
     @objc private func openFile() {
