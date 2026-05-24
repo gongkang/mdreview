@@ -73,6 +73,7 @@ final class MainWindowController: NSWindowController {
         tabBar.view.translatesAutoresizingMaskIntoConstraints = false
         splitView.translatesAutoresizingMaskIntoConstraints = false
         splitView.isVertical = true
+        splitView.delegate = self
         root.addSubview(tabBar.view)
         root.addSubview(splitView)
         root.addSubview(fileDividerButton)
@@ -93,17 +94,6 @@ final class MainWindowController: NSWindowController {
         splitView.addArrangedSubview(sidebar.filesContainer)
         splitView.addArrangedSubview(sidebar.outlineContainer)
         splitView.addArrangedSubview(renderer.view)
-        NSLayoutConstraint.activate([
-            fileDividerButton.centerXAnchor.constraint(equalTo: sidebar.filesContainer.trailingAnchor),
-            fileDividerButton.centerYAnchor.constraint(equalTo: splitView.centerYAnchor),
-            fileDividerButton.widthAnchor.constraint(equalToConstant: 22),
-            fileDividerButton.heightAnchor.constraint(equalToConstant: 22),
-
-            outlineDividerButton.centerXAnchor.constraint(equalTo: sidebar.outlineContainer.trailingAnchor),
-            outlineDividerButton.centerYAnchor.constraint(equalTo: splitView.centerYAnchor),
-            outlineDividerButton.widthAnchor.constraint(equalToConstant: 22),
-            outlineDividerButton.heightAnchor.constraint(equalToConstant: 22)
-        ])
         if let rendererURL = Bundle.main.resourceURL?.appendingPathComponent("renderer/index.html") {
             renderer.loadRenderer(from: rendererURL)
         }
@@ -124,8 +114,8 @@ final class MainWindowController: NSWindowController {
     }
 
     private func makeDividerButton(action: Selector) -> DividerButton {
-        let button = DividerButton()
-        button.translatesAutoresizingMaskIntoConstraints = false
+        let button = DividerButton(frame: NSRect(x: 0, y: 0, width: 22, height: 22))
+        button.translatesAutoresizingMaskIntoConstraints = true
         button.target = self
         button.action = action
         button.isHidden = true
@@ -206,6 +196,7 @@ final class MainWindowController: NSWindowController {
                 expandLabel: "展开大纲"
             )
         }
+        layoutDividerButtons()
     }
 
     private func configureDividerButton(_ button: DividerButton, collapsed: Bool, collapseLabel: String, expandLabel: String) {
@@ -221,6 +212,23 @@ final class MainWindowController: NSWindowController {
         button.clearSymbol()
         button.setAccessibilityLabel(nil)
         button.toolTip = nil
+    }
+
+    private func layoutDividerButtons() {
+        guard window?.contentView != nil else { return }
+        positionDividerButton(fileDividerButton, atSplitX: sidebar.filesContainer.frame.maxX)
+        positionDividerButton(outlineDividerButton, atSplitX: sidebar.outlineContainer.frame.maxX)
+    }
+
+    private func positionDividerButton(_ button: DividerButton, atSplitX splitX: CGFloat) {
+        guard !button.isHidden, let root = window?.contentView else { return }
+        let center = splitView.convert(NSPoint(x: splitX, y: splitView.bounds.midY), to: root)
+        button.frame = NSRect(
+            x: round(center.x - button.bounds.width / 2),
+            y: round(center.y - button.bounds.height / 2),
+            width: button.bounds.width,
+            height: button.bounds.height
+        )
     }
 
     private func applyDefaultSplitRatioIfNeeded(for layoutMode: LayoutMode, force: Bool) {
@@ -252,6 +260,7 @@ final class MainWindowController: NSWindowController {
         }
 
         splitView.layoutSubtreeIfNeeded()
+        layoutDividerButtons()
     }
 
     private func render(tab: DocumentTab, workspaceRoot: URL?) {
@@ -298,6 +307,7 @@ final class MainWindowController: NSWindowController {
         updateDividerControls()
         splitView.setPosition(SidebarCollapse.railWidth, ofDividerAt: 0)
         splitView.layoutSubtreeIfNeeded()
+        layoutDividerButtons()
     }
 
     private func expandFiles() {
@@ -310,6 +320,7 @@ final class MainWindowController: NSWindowController {
         updateDividerControls()
         splitView.setPosition(targetWidth, ofDividerAt: 0)
         splitView.layoutSubtreeIfNeeded()
+        layoutDividerButtons()
     }
 
     private func collapseOutline() {
@@ -354,6 +365,7 @@ final class MainWindowController: NSWindowController {
             splitView.setPosition(filesWidth + adjustedOutlineWidth, ofDividerAt: 1)
         }
         splitView.layoutSubtreeIfNeeded()
+        layoutDividerButtons()
     }
 
     func reloadDocument() {
@@ -418,5 +430,11 @@ private final class DividerButton: NSButton {
             symbolView.widthAnchor.constraint(equalToConstant: 8),
             symbolView.heightAnchor.constraint(equalToConstant: 10)
         ])
+    }
+}
+
+extension MainWindowController: NSSplitViewDelegate {
+    func splitViewDidResizeSubviews(_ notification: Notification) {
+        layoutDividerButtons()
     }
 }
