@@ -16,12 +16,20 @@ final class MainWindowController: NSWindowController {
     private var settings: AppSettings
     private var lastAppliedLayoutMode: LayoutMode?
     private var isDeferringSplitRatioApplication = false
+    private var isFilesCollapsed = false
+    private var isOutlineCollapsed = false
+    private var lastExpandedFilesWidth: CGFloat?
+    private var lastExpandedOutlineWidth: CGFloat?
     private(set) var modelID: UUID?
 
     private enum SplitRatio {
         static let folderFiles: CGFloat = 0.17
         static let folderOutline: CGFloat = 0.14
         static let singleFileOutline: CGFloat = 0.16
+    }
+
+    private enum SidebarCollapse {
+        static let railWidth: CGFloat = 28
     }
 
     convenience init(
@@ -75,11 +83,11 @@ final class MainWindowController: NSWindowController {
             splitView.topAnchor.constraint(equalTo: tabBar.view.bottomAnchor),
             splitView.bottomAnchor.constraint(equalTo: root.bottomAnchor)
         ])
-        sidebar.filesView.translatesAutoresizingMaskIntoConstraints = false
-        sidebar.outlineView.translatesAutoresizingMaskIntoConstraints = false
+        sidebar.filesContainer.translatesAutoresizingMaskIntoConstraints = false
+        sidebar.outlineContainer.translatesAutoresizingMaskIntoConstraints = false
         renderer.view.translatesAutoresizingMaskIntoConstraints = false
-        splitView.addArrangedSubview(sidebar.filesView)
-        splitView.addArrangedSubview(sidebar.outlineView)
+        splitView.addArrangedSubview(sidebar.filesContainer)
+        splitView.addArrangedSubview(sidebar.outlineContainer)
         splitView.addArrangedSubview(renderer.view)
         if let rendererURL = Bundle.main.resourceURL?.appendingPathComponent("renderer/index.html") {
             renderer.loadRenderer(from: rendererURL)
@@ -90,6 +98,12 @@ final class MainWindowController: NSWindowController {
         }
         sidebar.onSelectHeading = { [weak self] id in
             self?.renderer.scrollToHeading(id: id)
+        }
+        sidebar.onExpandFiles = { [weak self] in
+            self?.expandFiles()
+        }
+        sidebar.onExpandOutline = { [weak self] in
+            self?.expandOutline()
         }
         renderer.onOutlineChanged = { [weak self] items in
             self?.sidebar.renderOutline(items)
@@ -107,6 +121,9 @@ final class MainWindowController: NSWindowController {
         let shouldApplyDefaultRatio = lastAppliedLayoutMode != windowModel.layoutMode
         lastAppliedLayoutMode = windowModel.layoutMode
         sidebar.apply(layoutMode: windowModel.layoutMode)
+        if shouldApplyDefaultRatio {
+            resetCollapsedState(for: windowModel.layoutMode)
+        }
         let active = windowModel.tabs.first(where: { $0.id == windowModel.activeTabID })
         let activeRelativePath = active.flatMap { tab -> String? in
             guard let root = windowModel.workspaceRoot else { return nil }
@@ -120,6 +137,18 @@ final class MainWindowController: NSWindowController {
         }
         watch(activeTab: active, workspaceRoot: windowModel.workspaceRoot)
         applyDefaultSplitRatioIfNeeded(for: windowModel.layoutMode, force: shouldApplyDefaultRatio)
+    }
+
+    private func resetCollapsedState(for layoutMode: LayoutMode) {
+        isFilesCollapsed = false
+        isOutlineCollapsed = false
+        lastExpandedFilesWidth = nil
+        lastExpandedOutlineWidth = nil
+        sidebar.setFilesCollapsed(false)
+        sidebar.setOutlineCollapsed(false)
+        if layoutMode == .outlineAndDocument {
+            sidebar.filesContainer.isHidden = true
+        }
     }
 
     private func applyDefaultSplitRatioIfNeeded(for layoutMode: LayoutMode, force: Bool) {
@@ -140,12 +169,12 @@ final class MainWindowController: NSWindowController {
 
         switch layoutMode {
         case .filesOutlineAndDocument:
-            sidebar.filesView.isHidden = false
+            sidebar.filesContainer.isHidden = false
             splitView.setPosition(totalWidth * SplitRatio.folderFiles, ofDividerAt: 0)
             splitView.setPosition(totalWidth * (SplitRatio.folderFiles + SplitRatio.folderOutline), ofDividerAt: 1)
             splitView.setPosition(totalWidth * SplitRatio.folderFiles, ofDividerAt: 0)
         case .outlineAndDocument:
-            sidebar.filesView.isHidden = true
+            sidebar.filesContainer.isHidden = true
             splitView.setPosition(0, ofDividerAt: 0)
             splitView.setPosition(totalWidth * SplitRatio.singleFileOutline, ofDividerAt: 1)
         }
@@ -168,11 +197,87 @@ final class MainWindowController: NSWindowController {
     }
 
     func toggleFiles() {
-        sidebar.toggleFiles()
+        guard currentWindowModel?.layoutMode == .filesOutlineAndDocument else { return }
+        if isFilesCollapsed {
+            expandFiles()
+        } else {
+            collapseFiles()
+        }
     }
 
     func toggleOutline() {
-        sidebar.toggleOutline()
+        if isOutlineCollapsed {
+            expandOutline()
+        } else {
+            collapseOutline()
+        }
+    }
+
+    private func collapseFiles() {
+        guard currentWindowModel?.layoutMode == .filesOutlineAndDocument else { return }
+        guard !isFilesCollapsed else { return }
+        splitView.layoutSubtreeIfNeeded()
+        let currentWidth = splitView.subviews[0].frame.width
+        if currentWidth > SidebarCollapse.railWidth {
+            lastExpandedFilesWidth = currentWidth
+        }
+        isFilesCollapsed = true
+        sidebar.setFilesCollapsed(true)
+        splitView.setPosition(SidebarCollapse.railWidth, ofDividerAt: 0)
+        splitView.layoutSubtreeIfNeeded()
+    }
+
+    private func expandFiles() {
+        guard currentWindowModel?.layoutMode == .filesOutlineAndDocument else { return }
+        guard isFilesCollapsed else { return }
+        splitView.layoutSubtreeIfNeeded()
+        let targetWidth = lastExpandedFilesWidth ?? splitView.bounds.width * SplitRatio.folderFiles
+        isFilesCollapsed = false
+        sidebar.setFilesCollapsed(false)
+        splitView.setPosition(targetWidth, ofDividerAt: 0)
+        splitView.layoutSubtreeIfNeeded()
+    }
+
+    private func collapseOutline() {
+        guard !isOutlineCollapsed else { return }
+        splitView.layoutSubtreeIfNeeded()
+        let currentWidth = splitView.subviews[1].frame.width
+        if currentWidth > SidebarCollapse.railWidth {
+            lastExpandedOutlineWidth = currentWidth + splitView.dividerThickness
+        }
+        isOutlineCollapsed = true
+        sidebar.setOutlineCollapsed(true)
+        setOutlineWidth(SidebarCollapse.railWidth)
+    }
+
+    private func expandOutline() {
+        guard isOutlineCollapsed else { return }
+        splitView.layoutSubtreeIfNeeded()
+        let targetWidth: CGFloat
+        if let lastExpandedOutlineWidth {
+            targetWidth = lastExpandedOutlineWidth
+        } else if currentWindowModel?.layoutMode == .filesOutlineAndDocument {
+            targetWidth = splitView.bounds.width * SplitRatio.folderOutline
+        } else {
+            targetWidth = splitView.bounds.width * SplitRatio.singleFileOutline
+        }
+        isOutlineCollapsed = false
+        sidebar.setOutlineCollapsed(false)
+        setOutlineWidth(targetWidth)
+    }
+
+    private func setOutlineWidth(_ outlineWidth: CGFloat) {
+        splitView.layoutSubtreeIfNeeded()
+        let adjustedOutlineWidth = outlineWidth + splitView.dividerThickness
+        if currentWindowModel?.layoutMode == .outlineAndDocument {
+            sidebar.filesContainer.isHidden = true
+            splitView.setPosition(0, ofDividerAt: 0)
+            splitView.setPosition(adjustedOutlineWidth, ofDividerAt: 1)
+        } else {
+            let filesWidth = splitView.subviews[0].frame.width
+            splitView.setPosition(filesWidth + adjustedOutlineWidth, ofDividerAt: 1)
+        }
+        splitView.layoutSubtreeIfNeeded()
     }
 
     func reloadDocument() {

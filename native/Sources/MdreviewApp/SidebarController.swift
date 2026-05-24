@@ -5,12 +5,26 @@ import MdreviewCore
 final class SidebarController {
     let filesView: NSScrollView = SidebarScrollView()
     let outlineView: NSScrollView = SidebarScrollView()
+    private(set) lazy var filesContainer = SidebarPaneView(
+        contentView: filesView,
+        expandAccessibilityLabel: "展开文件列表",
+        target: self,
+        action: #selector(expandFilesFromRail)
+    )
+    private(set) lazy var outlineContainer = SidebarPaneView(
+        contentView: outlineView,
+        expandAccessibilityLabel: "展开大纲",
+        target: self,
+        action: #selector(expandOutlineFromRail)
+    )
     private let filesStack = SidebarStackView()
     private let outlineStack = SidebarStackView()
     private var outlineItems = [NativeOutlineItem]()
     private var activeHeadingID: String?
     var onSelectFile: ((String) -> Void)?
     var onSelectHeading: ((String) -> Void)?
+    var onExpandFiles: (() -> Void)?
+    var onExpandOutline: (() -> Void)?
 
     init() {
         configure(filesView, stack: filesStack)
@@ -28,7 +42,10 @@ final class SidebarController {
     }
 
     func apply(layoutMode: LayoutMode) {
-        filesView.isHidden = layoutMode == .outlineAndDocument
+        filesContainer.isHidden = layoutMode == .outlineAndDocument
+        if layoutMode == .outlineAndDocument {
+            filesContainer.setCollapsed(false)
+        }
     }
 
     func renderFiles(nodes: [MarkdownNode], activePath: String?) {
@@ -90,11 +107,27 @@ final class SidebarController {
     }
 
     func toggleFiles() {
-        filesView.isHidden.toggle()
+        setFilesCollapsed(!filesContainer.isCollapsed)
     }
 
     func toggleOutline() {
-        outlineView.isHidden.toggle()
+        setOutlineCollapsed(!outlineContainer.isCollapsed)
+    }
+
+    func setFilesCollapsed(_ collapsed: Bool) {
+        filesContainer.setCollapsed(collapsed)
+    }
+
+    func setOutlineCollapsed(_ collapsed: Bool) {
+        outlineContainer.setCollapsed(collapsed)
+    }
+
+    @objc private func expandFilesFromRail() {
+        onExpandFiles?()
+    }
+
+    @objc private func expandOutlineFromRail() {
+        onExpandOutline?()
     }
 
     @objc private func selectFile(_ sender: SidebarRowButton) {
@@ -156,5 +189,72 @@ private final class SidebarScrollView: NSScrollView {
             height: max(contentView.bounds.height, fittingSize.height)
         )
         stack.layoutSubtreeIfNeeded()
+    }
+}
+
+@MainActor
+final class SidebarPaneView: NSView {
+    static let collapsedWidth: CGFloat = 28
+
+    private let contentView: NSView
+    private let railView = NSView()
+    private let expandButton = NSButton()
+    private let expandAccessibilityLabel: String
+    private(set) var isCollapsed = false
+
+    init(contentView: NSView, expandAccessibilityLabel: String, target: AnyObject?, action: Selector) {
+        self.contentView = contentView
+        self.expandAccessibilityLabel = expandAccessibilityLabel
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        railView.translatesAutoresizingMaskIntoConstraints = false
+        railView.wantsLayer = true
+
+        expandButton.translatesAutoresizingMaskIntoConstraints = false
+        expandButton.target = target
+        expandButton.action = action
+        expandButton.isBordered = false
+        expandButton.bezelStyle = .regularSquare
+        expandButton.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
+        expandButton.imagePosition = .imageOnly
+
+        addSubview(contentView)
+        addSubview(railView)
+        railView.addSubview(expandButton)
+
+        NSLayoutConstraint.activate([
+            contentView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            contentView.topAnchor.constraint(equalTo: topAnchor),
+            contentView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            railView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            railView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            railView.topAnchor.constraint(equalTo: topAnchor),
+            railView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            expandButton.centerXAnchor.constraint(equalTo: railView.centerXAnchor),
+            expandButton.topAnchor.constraint(equalTo: railView.topAnchor, constant: 10),
+            expandButton.widthAnchor.constraint(equalToConstant: 22),
+            expandButton.heightAnchor.constraint(equalToConstant: 22)
+        ])
+
+        setCollapsed(false)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    func setCollapsed(_ collapsed: Bool) {
+        isCollapsed = collapsed
+        contentView.isHidden = collapsed
+        railView.isHidden = !collapsed
+        expandButton.setAccessibilityLabel(collapsed ? expandAccessibilityLabel : nil)
+        expandButton.toolTip = collapsed ? expandAccessibilityLabel : nil
+        needsLayout = true
     }
 }
