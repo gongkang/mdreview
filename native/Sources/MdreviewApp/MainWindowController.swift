@@ -13,16 +13,42 @@ final class MainWindowController: NSWindowController {
     private var currentWorkspaceRoot: URL?
     private var currentWindowModel: WindowModel?
     private var activeWatcher: FileWatcher?
-    private var settings = SettingsStore.load()
-    private var filesWidthConstraint: NSLayoutConstraint?
-    private var outlineWidthConstraint: NSLayoutConstraint?
+    private var settings: AppSettings
+    private var lastAppliedLayoutMode: LayoutMode?
+    private var isDeferringSplitRatioApplication = false
     private(set) var modelID: UUID?
 
-    convenience init() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        self.init(window: window)
+    private enum SplitRatio {
+        static let folderFiles: CGFloat = 0.17
+        static let folderOutline: CGFloat = 0.14
+        static let singleFileOutline: CGFloat = 0.16
+    }
+
+    convenience init(
+        visibleFrame: NSRect? = NSScreen.main?.visibleFrame,
+        settings: AppSettings = SettingsStore.load()
+    ) {
+        let frame = visibleFrame ?? NSRect(x: 0, y: 0, width: 1100, height: 760)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: min(frame.width, 1100), height: min(frame.height, 760)),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.setFrame(frame, display: false)
+        self.init(window: window, settings: settings)
         window.title = "mdreview"
         buildLayout()
+    }
+
+    init(window: NSWindow, settings: AppSettings = SettingsStore.load()) {
+        self.settings = settings
+        super.init(window: window)
+    }
+
+    required init?(coder: NSCoder) {
+        self.settings = SettingsStore.load()
+        super.init(coder: coder)
     }
 
     override func windowDidLoad() {
@@ -58,13 +84,6 @@ final class MainWindowController: NSWindowController {
         if let rendererURL = Bundle.main.resourceURL?.appendingPathComponent("renderer/index.html") {
             renderer.loadRenderer(from: rendererURL)
         }
-        filesWidthConstraint = sidebar.filesView.widthAnchor.constraint(equalToConstant: CGFloat(settings.filesWidth))
-        outlineWidthConstraint = sidebar.outlineView.widthAnchor.constraint(equalToConstant: CGFloat(settings.outlineWidth))
-        filesWidthConstraint?.priority = .defaultHigh
-        outlineWidthConstraint?.priority = .defaultHigh
-        let rendererMinimumWidth = renderer.view.widthAnchor.constraint(greaterThanOrEqualToConstant: 320)
-        rendererMinimumWidth.priority = .defaultHigh
-        NSLayoutConstraint.activate([filesWidthConstraint, outlineWidthConstraint, rendererMinimumWidth].compactMap { $0 })
         sidebar.onSelectFile = { [weak self] relativePath in
             guard let self, let root = self.currentWorkspaceRoot else { return }
             self.onOpenWorkspaceFile?(root.appendingPathComponent(relativePath))
@@ -85,8 +104,9 @@ final class MainWindowController: NSWindowController {
         currentWindowModel = windowModel
         currentWorkspaceRoot = windowModel.workspaceRoot
         tabBar.render(tabs: windowModel.tabs, activeTabID: windowModel.activeTabID)
+        let shouldApplyDefaultRatio = lastAppliedLayoutMode != windowModel.layoutMode
+        lastAppliedLayoutMode = windowModel.layoutMode
         sidebar.apply(layoutMode: windowModel.layoutMode)
-        applySidebarWidths(layoutMode: windowModel.layoutMode)
         let active = windowModel.tabs.first(where: { $0.id == windowModel.activeTabID })
         let activeRelativePath = active.flatMap { tab -> String? in
             guard let root = windowModel.workspaceRoot else { return nil }
@@ -99,11 +119,38 @@ final class MainWindowController: NSWindowController {
             render(tab: active, workspaceRoot: windowModel.workspaceRoot)
         }
         watch(activeTab: active, workspaceRoot: windowModel.workspaceRoot)
+        applyDefaultSplitRatioIfNeeded(for: windowModel.layoutMode, force: shouldApplyDefaultRatio)
     }
 
-    private func applySidebarWidths(layoutMode: LayoutMode) {
-        filesWidthConstraint?.constant = layoutMode == .outlineAndDocument ? 0 : CGFloat(settings.filesWidth)
-        outlineWidthConstraint?.constant = CGFloat(settings.outlineWidth)
+    private func applyDefaultSplitRatioIfNeeded(for layoutMode: LayoutMode, force: Bool) {
+        guard force else { return }
+        window?.contentView?.layoutSubtreeIfNeeded()
+        splitView.layoutSubtreeIfNeeded()
+
+        let totalWidth = splitView.bounds.width
+        guard totalWidth > 0 else {
+            guard !isDeferringSplitRatioApplication else { return }
+            isDeferringSplitRatioApplication = true
+            DispatchQueue.main.async { [weak self] in
+                self?.isDeferringSplitRatioApplication = false
+                self?.applyDefaultSplitRatioIfNeeded(for: layoutMode, force: true)
+            }
+            return
+        }
+
+        switch layoutMode {
+        case .filesOutlineAndDocument:
+            sidebar.filesView.isHidden = false
+            splitView.setPosition(totalWidth * SplitRatio.folderFiles, ofDividerAt: 0)
+            splitView.setPosition(totalWidth * (SplitRatio.folderFiles + SplitRatio.folderOutline), ofDividerAt: 1)
+            splitView.setPosition(totalWidth * SplitRatio.folderFiles, ofDividerAt: 0)
+        case .outlineAndDocument:
+            sidebar.filesView.isHidden = true
+            splitView.setPosition(0, ofDividerAt: 0)
+            splitView.setPosition(totalWidth * SplitRatio.singleFileOutline, ofDividerAt: 1)
+        }
+
+        splitView.layoutSubtreeIfNeeded()
     }
 
     private func render(tab: DocumentTab, workspaceRoot: URL?) {

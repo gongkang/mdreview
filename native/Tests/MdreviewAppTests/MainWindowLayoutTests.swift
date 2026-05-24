@@ -212,6 +212,162 @@ final class MainWindowLayoutTests: XCTestCase {
         XCTAssertEqual(inactive?.isActive, false)
     }
 
+    func testDirectoryModeStartsWithApprovedSplitRatio() throws {
+        let controller = MainWindowController(
+            visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800),
+            settings: AppSettings(
+                openFoldersInNewWindow: false,
+                autoRefreshSingleFile: true,
+                restoreLastWindow: false,
+                filesWidth: 500,
+                outlineWidth: 400,
+                showFiles: true,
+                showOutline: true
+            )
+        )
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-layout")
+        let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
+                tabs: [tab],
+                activeTabID: tab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        let files = splitView.subviews[0]
+        let outline = splitView.subviews[1]
+        let document = splitView.subviews[2]
+        let contentWidth = files.frame.width + outline.frame.width + document.frame.width
+
+        XCTAssertFalse(files.isHidden)
+        XCTAssertFalse(outline.isHidden)
+        XCTAssertEqual(files.frame.width / contentWidth, 0.17, accuracy: 0.04)
+        XCTAssertEqual(outline.frame.width / contentWidth, 0.14, accuracy: 0.04)
+        XCTAssertEqual(document.frame.width / contentWidth, 0.69, accuracy: 0.05)
+    }
+
+    func testSingleFileModeStartsWithApprovedSplitRatio() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let tab = DocumentTab(url: URL(fileURLWithPath: "/tmp/README.md"))
+        controller.apply(windowModel: WindowModel(tabs: [tab], activeTabID: tab.id, layoutMode: .outlineAndDocument))
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        let files = splitView.subviews[0]
+        let outline = splitView.subviews[1]
+        let document = splitView.subviews[2]
+        let visibleWidth = outline.frame.width + document.frame.width
+
+        XCTAssertTrue(files.isHidden)
+        XCTAssertFalse(outline.isHidden)
+        XCTAssertEqual(outline.frame.width / visibleWidth, 0.16, accuracy: 0.04)
+        XCTAssertEqual(document.frame.width / visibleWidth, 0.84, accuracy: 0.04)
+    }
+
+    func testDividerMovementIsNotResetForSameLayoutMode() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-layout")
+        let first = DocumentTab(url: root.appendingPathComponent("README.md"))
+        let second = DocumentTab(url: root.appendingPathComponent("Guide.md"))
+        let tree = [
+            MarkdownNode(type: .file, name: "README.md", path: "README.md", children: []),
+            MarkdownNode(type: .file, name: "Guide.md", path: "Guide.md", children: [])
+        ]
+
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: tree,
+                tabs: [first],
+                activeTabID: first.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        splitView.setPosition(300, ofDividerAt: 0)
+        splitView.setPosition(520, ofDividerAt: 1)
+        splitView.layoutSubtreeIfNeeded()
+        let filesWidth = splitView.subviews[0].frame.width
+        let outlineWidth = splitView.subviews[1].frame.width
+
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: tree,
+                tabs: [second],
+                activeTabID: second.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(splitView.subviews[0].frame.width, filesWidth, accuracy: 3)
+        XCTAssertEqual(splitView.subviews[1].frame.width, outlineWidth, accuracy: 3)
+    }
+
+    func testLayoutModeChangeReappliesModeDefaultRatio() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-layout")
+        let directoryTab = DocumentTab(url: root.appendingPathComponent("README.md"))
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
+                tabs: [directoryTab],
+                activeTabID: directoryTab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        splitView.setPosition(360, ofDividerAt: 0)
+        splitView.setPosition(620, ofDividerAt: 1)
+        splitView.layoutSubtreeIfNeeded()
+
+        let fileTab = DocumentTab(url: URL(fileURLWithPath: "/tmp/Standalone.md"))
+        controller.apply(windowModel: WindowModel(tabs: [fileTab], activeTabID: fileTab.id, layoutMode: .outlineAndDocument))
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let outline = splitView.subviews[1]
+        let document = splitView.subviews[2]
+        let visibleWidth = outline.frame.width + document.frame.width
+
+        XCTAssertTrue(splitView.subviews[0].isHidden)
+        XCTAssertEqual(outline.frame.width / visibleWidth, 0.16, accuracy: 0.04)
+    }
+
+    func testMainWindowInitializesToVisibleFrameWithoutFullScreen() {
+        let visibleFrame = NSRect(x: 12, y: 34, width: 1440, height: 900)
+        let controller = MainWindowController(visibleFrame: visibleFrame)
+        defer { controller.window?.close() }
+
+        XCTAssertEqual(controller.window?.frame.origin.x ?? 0, visibleFrame.origin.x, accuracy: 1)
+        XCTAssertEqual(controller.window?.frame.origin.y ?? 0, visibleFrame.origin.y, accuracy: 1)
+        XCTAssertEqual(controller.window?.frame.width ?? 0, visibleFrame.width, accuracy: 1)
+        XCTAssertEqual(controller.window?.frame.height ?? 0, visibleFrame.height, accuracy: 1)
+        XCTAssertFalse(controller.window?.styleMask.contains(.fullScreen) ?? true)
+    }
+
     private func findSubview<T: NSView>(ofType type: T.Type, in view: NSView?) -> T? {
         guard let view else { return nil }
         if let match = view as? T { return match }
