@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { isValidElement, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -29,15 +29,36 @@ type HastNode = {
 };
 
 function slugify(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "section";
+}
+
+function uniqueSlug(value: string, used: Map<string, number>): string {
+  const base = slugify(value);
+  const count = used.get(base) ?? 0;
+  used.set(base, count + 1);
+  return count === 0 ? base : `${base}-${count}`;
 }
 
 export function outlineFromMarkdown(content: string): OutlineItem[] {
+  const used = new Map<string, number>();
   return content
     .split("\n")
     .map((line) => /^(#{1,6})\s+(.+)$/.exec(line))
     .filter((match): match is RegExpExecArray => Boolean(match))
-    .map((match) => ({ depth: match[1].length, text: match[2], id: slugify(match[2]) }));
+    .map((match) => ({ depth: match[1].length, text: match[2], id: uniqueSlug(match[2], used) }));
+}
+
+function textFromReactNode(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number" || typeof node === "bigint") return String(node);
+  if (Array.isArray(node)) return node.map(textFromReactNode).join("");
+  if (isValidElement<{ children?: ReactNode }>(node)) return textFromReactNode(node.props.children);
+  return "";
 }
 
 function MermaidBlock({ code }: { code: string }) {
@@ -123,6 +144,8 @@ function CopyableCodeBlock({ className, code, children }: { className?: string; 
 export function MarkdownView({ content, onOutline, enableCodeCopy = false }: MarkdownViewProps) {
   const outline = useMemo(() => outlineFromMarkdown(content), [content]);
   const [dynamicPlugins, setDynamicPlugins] = useState<DynamicPlugins>({});
+  const headingSlugs = new Map<string, number>();
+  const headingID = (children: ReactNode) => uniqueSlug(textFromReactNode(children), headingSlugs);
 
   useEffect(() => {
     onOutline(outline);
@@ -152,9 +175,12 @@ export function MarkdownView({ content, onOutline, enableCodeCopy = false }: Mar
       remarkPlugins={remarkPlugins}
       rehypePlugins={rehypePlugins}
       components={{
-        h1: ({ children }) => <h1 id={slugify(String(children))}>{children}</h1>,
-        h2: ({ children }) => <h2 id={slugify(String(children))}>{children}</h2>,
-        h3: ({ children }) => <h3 id={slugify(String(children))}>{children}</h3>,
+        h1: ({ children }) => <h1 id={headingID(children)}>{children}</h1>,
+        h2: ({ children }) => <h2 id={headingID(children)}>{children}</h2>,
+        h3: ({ children }) => <h3 id={headingID(children)}>{children}</h3>,
+        h4: ({ children }) => <h4 id={headingID(children)}>{children}</h4>,
+        h5: ({ children }) => <h5 id={headingID(children)}>{children}</h5>,
+        h6: ({ children }) => <h6 id={headingID(children)}>{children}</h6>,
         pre({ children }) {
           return enableCodeCopy ? <>{children}</> : <pre>{children}</pre>;
         },

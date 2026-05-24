@@ -17,4 +17,20 @@ final class MarkdownOutlineTests: XCTestCase {
             NativeOutlineItem(id: "deep", text: "Deep", depth: 4)
         ])
     }
+
+    func testParsesNonLatinHeadingsWithUniqueStableIDs() {
+        let items = MarkdownOutline.parse("""
+        # mdreview
+        ## 使用
+        ## 开发
+        ## 使用
+        """)
+
+        XCTAssertEqual(items, [
+            NativeOutlineItem(id: "mdreview", text: "mdreview", depth: 1),
+            NativeOutlineItem(id: "使用", text: "使用", depth: 2),
+            NativeOutlineItem(id: "开发", text: "开发", depth: 2),
+            NativeOutlineItem(id: "使用-1", text: "使用", depth: 2)
+        ])
+    }
 }

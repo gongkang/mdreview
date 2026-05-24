@@ -95,6 +95,26 @@ final class MainWindowLayoutTests: XCTestCase {
         XCTAssertFalse(rerenderedTitleRow.isActive)
     }
 
+    func testNonLatinOutlineSelectionActivatesOnlyClickedHeading() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("mdreview-reader-non-latin-active-\(UUID().uuidString).md")
+        try "# mdreview\n\n## 使用\n\n## 开发\n".write(to: file, atomically: true, encoding: .utf8)
+        let controller = MainWindowController()
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let tab = DocumentTab(url: file)
+        controller.apply(windowModel: WindowModel(tabs: [tab], activeTabID: tab.id, layoutMode: .outlineAndDocument))
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let usageRow = try XCTUnwrap(findSubviews(ofType: SidebarRowButton.self, in: controller.window?.contentView).first { $0.title == "使用" })
+        usageRow.performClick(nil)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let rows = findSubviews(ofType: SidebarRowButton.self, in: controller.window?.contentView)
+        let activeTitles = rows.filter(\.isActive).map(\.title)
+        XCTAssertEqual(activeTitles, ["使用"])
+    }
+
     func testActiveSidebarRowsUseSubtleReaderSelection() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("mdreview-reader-subtle-selection-\(UUID().uuidString).md")
         try "# Title\n\n## Usage\n".write(to: file, atomically: true, encoding: .utf8)
