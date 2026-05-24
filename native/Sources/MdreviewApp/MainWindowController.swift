@@ -3,6 +3,8 @@ import MdreviewCore
 
 final class MainWindowController: NSWindowController {
     private let splitView = NSSplitView()
+    private lazy var fileDividerButton = makeDividerButton(action: #selector(toggleFilesFromDivider))
+    private lazy var outlineDividerButton = makeDividerButton(action: #selector(toggleOutlineFromDivider))
     private let tabBar = DocumentTabBar()
     private let sidebar = SidebarController()
     private let resourceHandler = ResourceSchemeHandler()
@@ -73,6 +75,8 @@ final class MainWindowController: NSWindowController {
         splitView.isVertical = true
         root.addSubview(tabBar.view)
         root.addSubview(splitView)
+        root.addSubview(fileDividerButton)
+        root.addSubview(outlineDividerButton)
         NSLayoutConstraint.activate([
             tabBar.view.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             tabBar.view.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -89,6 +93,17 @@ final class MainWindowController: NSWindowController {
         splitView.addArrangedSubview(sidebar.filesContainer)
         splitView.addArrangedSubview(sidebar.outlineContainer)
         splitView.addArrangedSubview(renderer.view)
+        NSLayoutConstraint.activate([
+            fileDividerButton.centerXAnchor.constraint(equalTo: sidebar.filesContainer.trailingAnchor),
+            fileDividerButton.centerYAnchor.constraint(equalTo: splitView.centerYAnchor),
+            fileDividerButton.widthAnchor.constraint(equalToConstant: 22),
+            fileDividerButton.heightAnchor.constraint(equalToConstant: 22),
+
+            outlineDividerButton.centerXAnchor.constraint(equalTo: sidebar.outlineContainer.trailingAnchor),
+            outlineDividerButton.centerYAnchor.constraint(equalTo: splitView.centerYAnchor),
+            outlineDividerButton.widthAnchor.constraint(equalToConstant: 22),
+            outlineDividerButton.heightAnchor.constraint(equalToConstant: 22)
+        ])
         if let rendererURL = Bundle.main.resourceURL?.appendingPathComponent("renderer/index.html") {
             renderer.loadRenderer(from: rendererURL)
         }
@@ -99,18 +114,30 @@ final class MainWindowController: NSWindowController {
         sidebar.onSelectHeading = { [weak self] id in
             self?.renderer.scrollToHeading(id: id)
         }
-        sidebar.onExpandFiles = { [weak self] in
-            self?.expandFiles()
-        }
-        sidebar.onExpandOutline = { [weak self] in
-            self?.expandOutline()
-        }
         renderer.onOutlineChanged = { [weak self] items in
             self?.sidebar.renderOutline(items)
         }
         tabBar.onSelectTab = { [weak self] tabID in
             self?.onSelectTab?(tabID)
         }
+        updateDividerControls()
+    }
+
+    private func makeDividerButton(action: Selector) -> DividerButton {
+        let button = DividerButton()
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.target = self
+        button.action = action
+        button.isHidden = true
+        return button
+    }
+
+    @objc private func toggleFilesFromDivider() {
+        toggleFiles()
+    }
+
+    @objc private func toggleOutlineFromDivider() {
+        toggleOutline()
     }
 
     func apply(windowModel: WindowModel) {
@@ -137,6 +164,7 @@ final class MainWindowController: NSWindowController {
         }
         watch(activeTab: active, workspaceRoot: windowModel.workspaceRoot)
         applyDefaultSplitRatioIfNeeded(for: windowModel.layoutMode, force: shouldApplyDefaultRatio)
+        updateDividerControls(for: windowModel.layoutMode)
     }
 
     private func resetCollapsedState(for layoutMode: LayoutMode) {
@@ -149,6 +177,50 @@ final class MainWindowController: NSWindowController {
         if layoutMode == .outlineAndDocument {
             sidebar.filesContainer.isHidden = true
         }
+        updateDividerControls(for: layoutMode)
+    }
+
+    private func updateDividerControls(for layoutMode: LayoutMode? = nil) {
+        let mode = layoutMode ?? currentWindowModel?.layoutMode
+
+        if mode == .filesOutlineAndDocument {
+            fileDividerButton.isHidden = false
+            configureDividerButton(
+                fileDividerButton,
+                collapsed: isFilesCollapsed,
+                collapseLabel: "收起文件列表",
+                expandLabel: "展开文件列表"
+            )
+        } else {
+            clearDividerButton(fileDividerButton)
+        }
+
+        if mode == nil {
+            clearDividerButton(outlineDividerButton)
+        } else {
+            outlineDividerButton.isHidden = false
+            configureDividerButton(
+                outlineDividerButton,
+                collapsed: isOutlineCollapsed,
+                collapseLabel: "收起大纲",
+                expandLabel: "展开大纲"
+            )
+        }
+    }
+
+    private func configureDividerButton(_ button: DividerButton, collapsed: Bool, collapseLabel: String, expandLabel: String) {
+        let label = collapsed ? expandLabel : collapseLabel
+        let symbolName = collapsed ? "chevron.right" : "chevron.left"
+        button.setSymbolName(symbolName)
+        button.setAccessibilityLabel(label)
+        button.toolTip = label
+    }
+
+    private func clearDividerButton(_ button: DividerButton) {
+        button.isHidden = true
+        button.clearSymbol()
+        button.setAccessibilityLabel(nil)
+        button.toolTip = nil
     }
 
     private func applyDefaultSplitRatioIfNeeded(for layoutMode: LayoutMode, force: Bool) {
@@ -223,6 +295,7 @@ final class MainWindowController: NSWindowController {
         }
         isFilesCollapsed = true
         sidebar.setFilesCollapsed(true)
+        updateDividerControls()
         splitView.setPosition(SidebarCollapse.railWidth, ofDividerAt: 0)
         splitView.layoutSubtreeIfNeeded()
     }
@@ -234,6 +307,7 @@ final class MainWindowController: NSWindowController {
         let targetWidth = lastExpandedFilesWidth ?? splitView.bounds.width * SplitRatio.folderFiles
         isFilesCollapsed = false
         sidebar.setFilesCollapsed(false)
+        updateDividerControls()
         splitView.setPosition(targetWidth, ofDividerAt: 0)
         splitView.layoutSubtreeIfNeeded()
     }
@@ -247,6 +321,7 @@ final class MainWindowController: NSWindowController {
         }
         isOutlineCollapsed = true
         sidebar.setOutlineCollapsed(true)
+        updateDividerControls()
         setOutlineWidth(SidebarCollapse.railWidth)
     }
 
@@ -263,6 +338,7 @@ final class MainWindowController: NSWindowController {
         }
         isOutlineCollapsed = false
         sidebar.setOutlineCollapsed(false)
+        updateDividerControls()
         setOutlineWidth(targetWidth)
     }
 
@@ -296,5 +372,51 @@ final class MainWindowController: NSWindowController {
             }
         }
         activeWatcher?.start()
+    }
+}
+
+private final class DividerButton: NSButton {
+    private let symbolView = NSImageView()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configure()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configure()
+    }
+
+    func setSymbolName(_ symbolName: String) {
+        symbolView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+    }
+
+    func clearSymbol() {
+        symbolView.image = nil
+    }
+
+    private func configure() {
+        title = ""
+        setButtonType(.momentaryChange)
+        isBordered = false
+        bezelStyle = .regularSquare
+        focusRingType = .none
+        wantsLayer = true
+        layer?.cornerRadius = 11
+        layer?.borderWidth = 0.5
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.35).cgColor
+        layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.92).cgColor
+
+        symbolView.translatesAutoresizingMaskIntoConstraints = false
+        symbolView.contentTintColor = .secondaryLabelColor
+        symbolView.imageScaling = .scaleProportionallyDown
+        addSubview(symbolView)
+        NSLayoutConstraint.activate([
+            symbolView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            symbolView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            symbolView.widthAnchor.constraint(equalToConstant: 8),
+            symbolView.heightAnchor.constraint(equalToConstant: 10)
+        ])
     }
 }

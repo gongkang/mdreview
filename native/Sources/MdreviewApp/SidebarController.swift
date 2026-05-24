@@ -5,26 +5,14 @@ import MdreviewCore
 final class SidebarController {
     let filesView: NSScrollView = SidebarScrollView()
     let outlineView: NSScrollView = SidebarScrollView()
-    private(set) lazy var filesContainer = SidebarPaneView(
-        contentView: filesView,
-        expandAccessibilityLabel: "展开文件列表",
-        target: self,
-        action: #selector(expandFilesFromRail)
-    )
-    private(set) lazy var outlineContainer = SidebarPaneView(
-        contentView: outlineView,
-        expandAccessibilityLabel: "展开大纲",
-        target: self,
-        action: #selector(expandOutlineFromRail)
-    )
+    private(set) lazy var filesContainer = SidebarPaneView(contentView: filesView)
+    private(set) lazy var outlineContainer = SidebarPaneView(contentView: outlineView)
     private let filesStack = SidebarStackView()
     private let outlineStack = SidebarStackView()
     private var outlineItems = [NativeOutlineItem]()
     private var activeHeadingID: String?
     var onSelectFile: ((String) -> Void)?
     var onSelectHeading: ((String) -> Void)?
-    var onExpandFiles: (() -> Void)?
-    var onExpandOutline: (() -> Void)?
 
     init() {
         configure(filesView, stack: filesStack)
@@ -122,14 +110,6 @@ final class SidebarController {
         outlineContainer.setCollapsed(collapsed)
     }
 
-    @objc private func expandFilesFromRail() {
-        onExpandFiles?()
-    }
-
-    @objc private func expandOutlineFromRail() {
-        onExpandOutline?()
-    }
-
     @objc private func selectFile(_ sender: SidebarRowButton) {
         guard let path = sender.identifier?.rawValue else { return }
         onSelectFile?(path)
@@ -198,13 +178,10 @@ final class SidebarPaneView: NSView {
 
     private let contentView: NSView
     private let railView = NSView()
-    private let expandButton = NSButton()
-    private let expandAccessibilityLabel: String
     private(set) var isCollapsed = false
 
-    init(contentView: NSView, expandAccessibilityLabel: String, target: AnyObject?, action: Selector) {
+    init(contentView: NSView) {
         self.contentView = contentView
-        self.expandAccessibilityLabel = expandAccessibilityLabel
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
@@ -213,17 +190,8 @@ final class SidebarPaneView: NSView {
         railView.translatesAutoresizingMaskIntoConstraints = false
         railView.wantsLayer = true
 
-        expandButton.translatesAutoresizingMaskIntoConstraints = false
-        expandButton.target = target
-        expandButton.action = action
-        expandButton.isBordered = false
-        expandButton.bezelStyle = .regularSquare
-        expandButton.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
-        expandButton.imagePosition = .imageOnly
-
         addSubview(contentView)
         addSubview(railView)
-        railView.addSubview(expandButton)
 
         NSLayoutConstraint.activate([
             contentView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -234,12 +202,7 @@ final class SidebarPaneView: NSView {
             railView.leadingAnchor.constraint(equalTo: leadingAnchor),
             railView.trailingAnchor.constraint(equalTo: trailingAnchor),
             railView.topAnchor.constraint(equalTo: topAnchor),
-            railView.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-            expandButton.centerXAnchor.constraint(equalTo: railView.centerXAnchor),
-            expandButton.topAnchor.constraint(equalTo: railView.topAnchor, constant: 10),
-            expandButton.widthAnchor.constraint(equalToConstant: 22),
-            expandButton.heightAnchor.constraint(equalToConstant: 22)
+            railView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
 
         setCollapsed(false)
@@ -253,8 +216,6 @@ final class SidebarPaneView: NSView {
         isCollapsed = collapsed
         contentView.isHidden = collapsed
         railView.isHidden = !collapsed
-        expandButton.setAccessibilityLabel(collapsed ? expandAccessibilityLabel : nil)
-        expandButton.toolTip = collapsed ? expandAccessibilityLabel : nil
         needsLayout = true
     }
 }
