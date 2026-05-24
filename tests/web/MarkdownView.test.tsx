@@ -1,6 +1,10 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarkdownView } from "../../src/web/components/MarkdownView";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("MarkdownView", () => {
   it("renders headings with stable anchors and GFM task lists", () => {
@@ -15,5 +19,20 @@ describe("MarkdownView", () => {
     expect(alertSpy).not.toHaveBeenCalled();
     expect(document.querySelector("script")).toBeNull();
     expect(document.querySelector("[onerror]")).toBeNull();
+  });
+
+  it("copies fenced code blocks when native copy controls are enabled", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    });
+
+    render(<MarkdownView content={"```ts\nconst answer = 42;\n```"} enableCodeCopy onOutline={() => undefined} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "复制代码" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("const answer = 42;"));
+    expect(await screen.findByRole("button", { name: "已复制代码" })).toBeInTheDocument();
   });
 });

@@ -91,9 +91,9 @@ body {
 
 .native-reader .markdown-body {
   box-sizing: border-box;
-  max-width: 620px;
+  max-width: 860px;
   margin: 0 auto;
-  padding: 56px 40px 92px;
+  padding: 56px clamp(32px, 6vw, 72px) 92px;
   font-size: 15px;
   line-height: 1.86;
   color: #30363d;
@@ -152,12 +152,52 @@ body {
 }
 
 .native-reader .markdown-body pre {
+  margin: 0 0 18px;
   overflow: auto;
   border: 1px solid #d8dee4;
   border-radius: 9px;
   background: #fafafa;
   padding: 15px 17px;
   line-height: 1.65;
+}
+
+.native-reader .markdown-body .code-block {
+  overflow: hidden;
+  margin: 0 0 18px;
+  border: 1px solid #d8dee4;
+  border-radius: 9px;
+  background: #fafafa;
+}
+
+.native-reader .markdown-body .code-block-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 10px 0;
+}
+
+.native-reader .markdown-body .code-copy-button {
+  border: 1px solid #d8dee4;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #57606a;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 8px;
+}
+
+.native-reader .markdown-body .code-copy-button:hover {
+  border-color: #afb8c1;
+  color: #24292f;
+}
+
+.native-reader .markdown-body .code-block pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 8px 17px 16px;
 }
 
 .native-reader .markdown-body pre code {

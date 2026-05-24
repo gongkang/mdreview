@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
@@ -14,6 +15,17 @@ import "katex/dist/katex.min.css";
 type DynamicPlugins = {
   remarkMath?: PluggableList[number];
   rehypeKatex?: PluggableList[number];
+};
+
+type MarkdownViewProps = {
+  content: string;
+  onOutline: (items: OutlineItem[]) => void;
+  enableCodeCopy?: boolean;
+};
+
+type HastNode = {
+  value?: unknown;
+  children?: HastNode[];
 };
 
 function slugify(value: string): string {
@@ -53,7 +65,62 @@ function MermaidBlock({ code }: { code: string }) {
   return <div className="mermaid-output" dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
-export function MarkdownView({ content, onOutline }: { content: string; onOutline: (items: OutlineItem[]) => void }) {
+function textFromNode(node: HastNode | undefined): string {
+  if (!node) return "";
+  if (typeof node.value === "string") return node.value;
+  return node.children?.map(textFromNode).join("") ?? "";
+}
+
+function copyWithFallback(value: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(value);
+  }
+
+  const textArea = document.createElement("textarea");
+  textArea.value = value;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "fixed";
+  textArea.style.top = "-1000px";
+  document.body.appendChild(textArea);
+  textArea.select();
+  document.execCommand("copy");
+  textArea.remove();
+  return Promise.resolve();
+}
+
+function CopyableCodeBlock({ className, code, children }: { className?: string; code: string; children: ReactNode }) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const isCopied = copyState === "copied";
+  const isFailed = copyState === "failed";
+  const label = isCopied ? "已复制" : isFailed ? "复制失败" : "复制";
+  const accessibilityLabel = isCopied ? "已复制代码" : isFailed ? "复制代码失败" : "复制代码";
+
+  async function copy() {
+    try {
+      await copyWithFallback(code);
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 1400);
+    } catch {
+      setCopyState("failed");
+      window.setTimeout(() => setCopyState("idle"), 1800);
+    }
+  }
+
+  return (
+    <div className="code-block">
+      <div className="code-block-toolbar">
+        <button type="button" className="code-copy-button" aria-label={accessibilityLabel} onClick={copy}>
+          {label}
+        </button>
+      </div>
+      <pre>
+        <code className={className}>{children}</code>
+      </pre>
+    </div>
+  );
+}
+
+export function MarkdownView({ content, onOutline, enableCodeCopy = false }: MarkdownViewProps) {
   const outline = useMemo(() => outlineFromMarkdown(content), [content]);
   const [dynamicPlugins, setDynamicPlugins] = useState<DynamicPlugins>({});
 
@@ -88,10 +155,21 @@ export function MarkdownView({ content, onOutline }: { content: string; onOutlin
         h1: ({ children }) => <h1 id={slugify(String(children))}>{children}</h1>,
         h2: ({ children }) => <h2 id={slugify(String(children))}>{children}</h2>,
         h3: ({ children }) => <h3 id={slugify(String(children))}>{children}</h3>,
-        code({ className, children }) {
-          const code = String(children).replace(/\n$/, "");
+        pre({ children }) {
+          return enableCodeCopy ? <>{children}</> : <pre>{children}</pre>;
+        },
+        code({ className, children, node }) {
+          const rawCode = textFromNode(node as HastNode);
+          const code = rawCode.replace(/\n$/, "");
           if (/language-mermaid/i.test(className ?? "") && containsMermaid(`\`\`\`mermaid\n${code}\n\`\`\``)) {
             return <MermaidBlock code={code} />;
+          }
+          if (enableCodeCopy && rawCode.endsWith("\n")) {
+            return (
+              <CopyableCodeBlock className={className} code={code}>
+                {children}
+              </CopyableCodeBlock>
+            );
           }
           return <code className={className}>{children}</code>;
         }

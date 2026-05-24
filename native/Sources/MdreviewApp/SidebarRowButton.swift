@@ -91,10 +91,10 @@ final class SidebarRowButton: NSButton {
 
     private var backgroundColor: NSColor {
         if isActive {
-            return NSColor.separatorColor.withAlphaComponent(0.28)
+            return NSColor.separatorColor.withAlphaComponent(0.08)
         }
         if isHovered {
-            return NSColor.separatorColor.withAlphaComponent(0.16)
+            return NSColor.separatorColor.withAlphaComponent(0.05)
         }
         return .clear
     }

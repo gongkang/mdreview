@@ -95,6 +95,26 @@ final class MainWindowLayoutTests: XCTestCase {
         XCTAssertFalse(rerenderedTitleRow.isActive)
     }
 
+    func testActiveSidebarRowsUseSubtleReaderSelection() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("mdreview-reader-subtle-selection-\(UUID().uuidString).md")
+        try "# Title\n\n## Usage\n".write(to: file, atomically: true, encoding: .utf8)
+        let controller = MainWindowController()
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let tab = DocumentTab(url: file)
+        controller.apply(windowModel: WindowModel(tabs: [tab], activeTabID: tab.id, layoutMode: .outlineAndDocument))
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let titleRow = try XCTUnwrap(findSubviews(ofType: SidebarRowButton.self, in: controller.window?.contentView).first { $0.title == "Title" })
+        titleRow.performClick(nil)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let activeTitleRow = try XCTUnwrap(findSubviews(ofType: SidebarRowButton.self, in: controller.window?.contentView).first { $0.title == "Title" })
+        XCTAssertTrue(activeTitleRow.isActive)
+        XCTAssertLessThanOrEqual(activeTitleRow.layer?.backgroundColor?.alpha ?? 1, 0.12)
+    }
+
     func testDirectoryModeFilesUseTextRowsAndActiveFileState() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("mdreview-files-\(UUID().uuidString)", isDirectory: true)
         let nested = root.appendingPathComponent("guide/advanced", isDirectory: true)

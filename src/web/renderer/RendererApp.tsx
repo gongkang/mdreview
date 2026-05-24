@@ -40,7 +40,7 @@ export function RendererApp() {
   return (
     <main className="native-reader">
       <article className="markdown-body">
-        <MarkdownView content={rewriteMarkdownResources(document.content)} onOutline={onOutline} />
+        <MarkdownView content={rewriteMarkdownResources(document.content)} enableCodeCopy onOutline={onOutline} />
       </article>
     </main>
   );

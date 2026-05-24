@@ -51,4 +51,17 @@ describe("RendererApp", () => {
     expect(container.querySelector(".native-reader")).toBeInTheDocument();
     expect(container.querySelector(".native-reader .markdown-body")).toBeInTheDocument();
   });
+
+  it("enables one-click code copying in the native renderer", async () => {
+    window.__mdreviewPendingDocument = {
+      type: "renderDocument",
+      path: "/tmp/code.md",
+      name: "code.md",
+      content: "```sh\nmdreview README.md\n```"
+    };
+
+    render(<RendererApp />);
+
+    expect(await screen.findByRole("button", { name: "复制代码" })).toBeInTheDocument();
+  });
 });
