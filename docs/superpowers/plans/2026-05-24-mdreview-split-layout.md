@@ -268,6 +268,7 @@ with:
 ```swift
 private var settings: AppSettings
 private var lastAppliedLayoutMode: LayoutMode?
+private var isDeferringSplitRatioApplication = false
 
 private enum SplitRatio {
     static let folderFiles: CGFloat = 0.17
@@ -287,11 +288,12 @@ convenience init(
 ) {
     let frame = visibleFrame ?? NSRect(x: 0, y: 0, width: 1100, height: 760)
     let window = NSWindow(
-        contentRect: frame,
+        contentRect: NSRect(x: 0, y: 0, width: min(frame.width, 1100), height: min(frame.height, 760)),
         styleMask: [.titled, .closable, .miniaturizable, .resizable],
         backing: .buffered,
         defer: false
     )
+    window.setFrame(frame, display: false)
     self.init(window: window, settings: settings)
     window.title = "mdreview"
     buildLayout()
@@ -338,7 +340,10 @@ private func applyDefaultSplitRatioIfNeeded(for layoutMode: LayoutMode, force: B
 
     let totalWidth = splitView.bounds.width
     guard totalWidth > 0 else {
+        guard !isDeferringSplitRatioApplication else { return }
+        isDeferringSplitRatioApplication = true
         DispatchQueue.main.async { [weak self] in
+            self?.isDeferringSplitRatioApplication = false
             self?.applyDefaultSplitRatioIfNeeded(for: layoutMode, force: true)
         }
         return
@@ -451,6 +456,32 @@ final class SettingsWindowTests: XCTestCase {
         XCTAssertEqual(controller.window?.frame.midY ?? 0, parent.frame.midY, accuracy: 1)
     }
 
+    func testSavingSettingsPreservesExistingSidebarWidths() throws {
+        var savedSettings: AppSettings?
+        let initial = AppSettings(
+            openFoldersInNewWindow: false,
+            autoRefreshSingleFile: true,
+            restoreLastWindow: false,
+            filesWidth: 333,
+            outlineWidth: 222,
+            showFiles: true,
+            showOutline: true
+        )
+        let controller = SettingsWindowController(settings: initial) { settings in
+            savedSettings = settings
+        }
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let autoRefresh = try XCTUnwrap(findSubviews(ofType: NSButton.self, in: controller.window?.contentView).first {
+            $0.title == "自动刷新单文件"
+        })
+        autoRefresh.performClick(nil)
+
+        XCTAssertEqual(savedSettings?.filesWidth, 333)
+        XCTAssertEqual(savedSettings?.outlineWidth, 222)
+    }
+
     private func findSubviews<T: NSView>(ofType type: T.Type, in view: NSView?) -> [T] {
         guard let view else { return [] }
         var matches = [T]()
@@ -473,7 +504,7 @@ Run:
 xcrun swift test --package-path native --filter SettingsWindowTests
 ```
 
-Expected: FAIL because `SettingsWindowController(settings:)` and `showCentered(relativeTo:)` do not exist, and width controls are still visible.
+Expected: FAIL because `SettingsWindowController(settings:saveSettings:)` and `showCentered(relativeTo:)` do not exist, and width controls are still visible.
 
 - [ ] **Step 3: Make SettingsWindowController testable and remove width UI**
 
@@ -506,14 +537,19 @@ with:
 static let shared = SettingsWindowController()
 
 private var settings: AppSettings
+private let saveSettings: (AppSettings) -> Void
 private let openFolders = NSButton(checkboxWithTitle: "打开文件夹时默认新建窗口", target: nil, action: nil)
 private let autoRefresh = NSButton(checkboxWithTitle: "自动刷新单文件", target: nil, action: nil)
 private let restoreWindow = NSButton(checkboxWithTitle: "启动时恢复上次窗口", target: nil, action: nil)
 private let showFiles = NSButton(checkboxWithTitle: "显示文件栏", target: nil, action: nil)
 private let showOutline = NSButton(checkboxWithTitle: "显示大纲栏", target: nil, action: nil)
 
-init(settings: AppSettings = SettingsStore.load()) {
+init(
+    settings: AppSettings = SettingsStore.load(),
+    saveSettings: @escaping (AppSettings) -> Void = { SettingsStore.save($0) }
+) {
     self.settings = settings
+    self.saveSettings = saveSettings
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 300), styleMask: [.titled, .closable], backing: .buffered, defer: false)
     super.init(window: window)
     window.title = "设置"
@@ -569,6 +605,18 @@ with:
 ```swift
 filesWidth: settings.filesWidth,
 outlineWidth: settings.outlineWidth,
+```
+
+Also in `save()`, replace:
+
+```swift
+SettingsStore.save(settings)
+```
+
+with:
+
+```swift
+saveSettings(settings)
 ```
 
 - [ ] **Step 4: Add centered show behavior**
