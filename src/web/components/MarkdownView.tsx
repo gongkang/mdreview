@@ -28,6 +28,11 @@ type HastNode = {
   children?: HastNode[];
 };
 
+type CodeFence = {
+  marker: "`" | "~";
+  length: number;
+};
+
 function slugify(value: string): string {
   const slug = value
     .trim()
@@ -46,11 +51,39 @@ function uniqueSlug(value: string, used: Map<string, number>): string {
 
 export function outlineFromMarkdown(content: string): OutlineItem[] {
   const used = new Map<string, number>();
-  return content
-    .split("\n")
-    .map((line) => /^(#{1,6})\s+(.+)$/.exec(line))
-    .filter((match): match is RegExpExecArray => Boolean(match))
-    .map((match) => ({ depth: match[1].length, text: match[2], id: uniqueSlug(match[2], used) }));
+  const outline: OutlineItem[] = [];
+  let activeFence: CodeFence | null = null;
+
+  for (const line of content.split("\n")) {
+    if (activeFence) {
+      if (closesFence(line, activeFence)) activeFence = null;
+      continue;
+    }
+
+    const fence = codeFenceFromLine(line);
+    if (fence) {
+      activeFence = fence;
+      continue;
+    }
+
+    const match = /^(#{1,6})\s+(.+)$/.exec(line);
+    if (match) {
+      outline.push({ depth: match[1].length, text: match[2], id: uniqueSlug(match[2], used) });
+    }
+  }
+
+  return outline;
+}
+
+function codeFenceFromLine(line: string): CodeFence | null {
+  const match = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+  if (!match) return null;
+  return { marker: match[1][0] as "`" | "~", length: match[1].length };
+}
+
+function closesFence(line: string, fence: CodeFence): boolean {
+  const pattern = new RegExp(`^ {0,3}\\${fence.marker}{${fence.length},}\\s*$`);
+  return pattern.test(line);
 }
 
 function textFromReactNode(node: ReactNode): string {

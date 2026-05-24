@@ -33,4 +33,25 @@ final class MarkdownOutlineTests: XCTestCase {
             NativeOutlineItem(id: "使用-1", text: "使用", depth: 2)
         ])
     }
+
+    func testIgnoresHeadingsInsideFencedCodeBlocks() {
+        let items = MarkdownOutline.parse("""
+        # Visible
+
+        ~~~markdown
+        # Hidden
+        ## Usage
+        ```bash
+        mdreview README.md
+        ```
+        ~~~
+
+        ## Also Visible
+        """)
+
+        XCTAssertEqual(items, [
+            NativeOutlineItem(id: "visible", text: "Visible", depth: 1),
+            NativeOutlineItem(id: "also-visible", text: "Also Visible", depth: 2)
+        ])
+    }
 }

@@ -1,11 +1,31 @@
 import Foundation
 
 public enum MarkdownOutline {
+    private struct CodeFence {
+        let marker: Character
+        let length: Int
+    }
+
     public static func parse(_ content: String) -> [NativeOutlineItem] {
         var usedSlugs = [String: Int]()
+        var activeFence: CodeFence?
         return content
             .split(separator: "\n", omittingEmptySubsequences: false)
-            .compactMap { parseHeading($0, usedSlugs: &usedSlugs) }
+            .compactMap { line in
+                if let fence = activeFence {
+                    if closesFence(line, fence: fence) {
+                        activeFence = nil
+                    }
+                    return nil
+                }
+
+                if let fence = codeFence(from: line) {
+                    activeFence = fence
+                    return nil
+                }
+
+                return parseHeading(line, usedSlugs: &usedSlugs)
+            }
     }
 
     private static func parseHeading(_ line: Substring, usedSlugs: inout [String: Int]) -> NativeOutlineItem? {
@@ -32,5 +52,46 @@ public enum MarkdownOutline {
             .replacingOccurrences(of: #"[^\p{L}\p{N}]+"#, with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         return slug.isEmpty ? "section" : slug
+    }
+
+    private static func codeFence(from line: Substring) -> CodeFence? {
+        var index = line.startIndex
+        var spaces = 0
+        while index < line.endIndex, line[index] == " ", spaces < 4 {
+            spaces += 1
+            line.formIndex(after: &index)
+        }
+        guard spaces <= 3, index < line.endIndex, line[index] != " " else { return nil }
+
+        let marker = line[index]
+        guard marker == "`" || marker == "~" else { return nil }
+
+        var length = 0
+        while index < line.endIndex, line[index] == marker {
+            length += 1
+            line.formIndex(after: &index)
+        }
+
+        guard length >= 3 else { return nil }
+        return CodeFence(marker: marker, length: length)
+    }
+
+    private static func closesFence(_ line: Substring, fence: CodeFence) -> Bool {
+        var index = line.startIndex
+        var spaces = 0
+        while index < line.endIndex, line[index] == " ", spaces < 4 {
+            spaces += 1
+            line.formIndex(after: &index)
+        }
+        guard spaces <= 3, index < line.endIndex, line[index] != " " else { return false }
+
+        var length = 0
+        while index < line.endIndex, line[index] == fence.marker {
+            length += 1
+            line.formIndex(after: &index)
+        }
+
+        guard length >= fence.length else { return false }
+        return line[index...].allSatisfy { $0 == " " || $0 == "\t" }
     }
 }

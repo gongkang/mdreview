@@ -26,6 +26,26 @@ describe("MarkdownView", () => {
     expect(screen.getAllByRole("heading", { name: "使用" })[1]).toHaveAttribute("id", "使用-1");
   });
 
+  it("excludes headings inside fenced code blocks from the outline", () => {
+    const outline = outlineFromMarkdown(
+      [
+        "# Visible",
+        "",
+        "~~~markdown",
+        "# Hidden",
+        "## Usage",
+        "```bash",
+        "mdreview README.md",
+        "```",
+        "~~~",
+        "",
+        "## Also Visible"
+      ].join("\n")
+    );
+
+    expect(outline.map((item) => item.text)).toEqual(["Visible", "Also Visible"]);
+  });
+
   it("does not execute script or event handler HTML", () => {
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => undefined);
     render(<MarkdownView content={'<img src=x onerror="alert(1)"><script>alert(2)</script>'} onOutline={() => undefined} />);
