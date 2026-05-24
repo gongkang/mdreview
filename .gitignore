@@ -1,8 +1,63 @@
+# Local workspace
 .superpowers/
 .worktrees/
+
+# Dependencies
 node_modules/
-dist/
-test-results/
-playwright-report/
-native/.build/
-native/dist/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# TypeScript/Vite build outputs and caches
+/dist/
+/build/
+*.tsbuildinfo
+.vite/
+.vitest/
+.cache/
+.tmp/
+.temp/
+*.tgz
+
+# Test outputs
+/coverage/
+/.nyc_output/
+/test-results/
+/playwright-report/
+/blob-report/
+
+# SwiftPM and macOS app build outputs
+/native/.build/
+/native/.swiftpm/
+/native/dist/
+/.build/
+/.swiftpm/
+*.dSYM/
+*.xcresult/
+
+# Xcode user state
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# macOS and editor files
+.DS_Store
+.AppleDouble
+.LSOverride
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
