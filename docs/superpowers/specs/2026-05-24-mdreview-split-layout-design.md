@@ -36,7 +36,7 @@ Single-file mode default ratio:
 - Outline: `16%`
 - Document area: `84%`
 
-These ratios are applied when a window first receives a folder or file layout. The document area remains the primary region and should get most of the width.
+These ratios are applied when a window first receives a folder or file layout, and when an existing window changes between folder mode and single-file mode. The document area remains the primary region and should get most of the width.
 
 ## Window Defaults
 
@@ -46,11 +46,13 @@ New main document windows should open maximized, not in macOS full-screen mode.
 - Do not call native full-screen APIs such as `toggleFullScreen`.
 - The maximized frame is only the initial window frame. Users can resize the window afterward.
 - This applies to windows created from the CLI, file/folder menu actions, and "open in new window" behavior.
+- Apply the maximized window frame before calculating split-view divider positions, so the `17 / 14 / 69` or `16 / 84` ratios are based on the final visible window width.
 
 The Settings window should open centered.
 
 - Prefer centering relative to the active main window when there is one.
 - Fall back to centering on the current or main screen.
+- Recenter the Settings window each time it is shown, not only when the singleton controller is first initialized.
 - The Settings window remains a normal titled utility window, not full-screen and not maximized.
 
 ## Dragging Behavior
@@ -62,7 +64,9 @@ Use native `NSSplitView` divider behavior.
 - The app should not add custom minimum or maximum width rules.
 - If a user drags a column very narrow, the content in that column may clip, truncate, or scroll according to the existing sidebar and renderer behavior.
 - Dragged widths are per-window and temporary.
-- Opening a new window, reopening a folder, or restarting the app restores the approved default ratio.
+- Opening a new window or restarting the app restores the approved default ratio.
+- Changing tabs or opening another file or folder in the same window should preserve the current divider positions when the layout mode stays the same.
+- If the same window changes between folder mode and single-file mode, apply that mode's approved default ratio because the number of visible columns changed.
 
 ## Architecture
 
@@ -94,13 +98,14 @@ The app menu should include a Quit item below Settings:
 
 ## Data Flow
 
-1. The app opens a file or folder and produces a `WindowModel`.
-2. `MainWindowController.apply(windowModel:)` updates tabs, sidebars, and renderer content.
-3. After the split view has a valid size, `MainWindowController` applies the default ratio for the current `LayoutMode`.
-4. The user may drag dividers. The split view updates the current window only.
-5. The app does not write the dragged widths to `SettingsStore`.
+1. A new main document window is created and maximized to the screen's visible frame.
+2. The app opens a file or folder and produces a `WindowModel`.
+3. `MainWindowController.apply(windowModel:)` updates tabs, sidebars, and renderer content.
+4. After the split view has a valid size, `MainWindowController` applies the default ratio for the current `LayoutMode` if this is a new window or the layout mode changed.
+5. The user may drag dividers. The split view updates the current window only.
+6. The app does not write the dragged widths to `SettingsStore`.
 
-The default ratio should be applied on layout-mode changes and new window setup, not continuously during every resize. A resize should preserve the user's current split proportions as much as native `NSSplitView` normally does.
+The default ratio should be applied on layout-mode changes and new window setup, not continuously during every resize or every document change. A resize should preserve the user's current split proportions as much as native `NSSplitView` normally does.
 
 ## Error Handling
 
@@ -116,9 +121,10 @@ Native layout tests should cover:
 - Folder mode initial widths approximate the `17 / 14 / 69` ratio for a known window width.
 - Single-file mode hides the file list and starts with outline/document widths near `16 / 84`.
 - Programmatic divider movement is not immediately reset by fixed width constraints.
+- Opening another document or folder in the same layout mode preserves the current divider positions.
 - Settings width values do not affect the default split positions.
 - New main windows initialize to the screen's visible frame without entering macOS full-screen mode.
-- The Settings window is centered when shown.
+- The Settings window is centered each time it is shown.
 - The app menu contains `退出 mdreview` below `设置...` and the item targets app termination.
 - Existing sidebar row rendering, outline selection, and tab tests continue to pass.
 
