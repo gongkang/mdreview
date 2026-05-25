@@ -91,12 +91,20 @@ body {
 
 .native-reader .markdown-body {
   box-sizing: border-box;
-  max-width: 860px;
+  max-width: 980px;
   margin: 0 auto;
   padding: 56px clamp(32px, 6vw, 72px) 92px;
   font-size: 15px;
   line-height: 1.86;
   color: #30363d;
+}
+
+.native-reader.native-reader--with-outline .markdown-body {
+  max-width: 1080px;
+  margin-left: 0;
+  margin-right: auto;
+  padding-left: clamp(44px, 5vw, 64px);
+  padding-right: clamp(32px, 5vw, 72px);
 }
 
 .native-reader .markdown-body h1,

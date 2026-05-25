@@ -7,6 +7,13 @@ final class SidebarRowButton: NSButton {
         case outline
     }
 
+    private static let outlineTextColor = NSColor(
+        calibratedRed: 0.12,
+        green: 0.14,
+        blue: 0.17,
+        alpha: 1
+    )
+
     let depth: Int
     private let kind: RowKind
     private var trackingArea: NSTrackingArea?
@@ -103,7 +110,10 @@ final class SidebarRowButton: NSButton {
         if isActive {
             return .labelColor
         }
-        return kind == .outline && depth > 1 ? .tertiaryLabelColor : .secondaryLabelColor
+        if kind == .outline {
+            return Self.outlineTextColor
+        }
+        return .secondaryLabelColor
     }
 
     private var fontForRow: NSFont {

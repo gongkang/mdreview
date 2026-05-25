@@ -4,7 +4,9 @@ import { RendererApp } from "../../../src/web/renderer/RendererApp";
 
 afterEach(() => {
   delete window.__mdreviewRenderDocument;
+  delete window.__mdreviewSetReaderLayout;
   delete window.__mdreviewPendingDocument;
+  delete window.__mdreviewPendingReaderLayout;
 });
 
 describe("RendererApp", () => {
@@ -63,5 +65,26 @@ describe("RendererApp", () => {
     render(<RendererApp />);
 
     expect(await screen.findByRole("button", { name: "复制代码" })).toBeInTheDocument();
+  });
+
+  it("uses the outline reader layout when native navigation is visible", async () => {
+    window.__mdreviewPendingDocument = {
+      type: "renderDocument",
+      path: "/tmp/outline.md",
+      name: "outline.md",
+      content: "# Outline",
+      readerLayout: "withOutline"
+    };
+
+    const { container } = render(<RendererApp />);
+
+    expect(await screen.findByRole("heading", { name: "Outline" })).toBeInTheDocument();
+    expect(container.querySelector(".native-reader--with-outline")).toBeInTheDocument();
+
+    act(() => {
+      window.__mdreviewSetReaderLayout?.("centered");
+    });
+
+    expect(container.querySelector(".native-reader--with-outline")).not.toBeInTheDocument();
   });
 });

@@ -135,6 +135,26 @@ final class MainWindowLayoutTests: XCTestCase {
         XCTAssertLessThanOrEqual(activeTitleRow.layer?.backgroundColor?.alpha ?? 1, 0.12)
     }
 
+    func testNestedOutlineRowsUseReadablePrimaryTextColor() throws {
+        let row = SidebarRowButton(
+            title: "Nested heading",
+            identifier: "nested-heading",
+            depth: 3,
+            isActive: false,
+            kind: .outline,
+            target: nil,
+            action: #selector(NSButton.performClick(_:))
+        )
+
+        let color = try XCTUnwrap(row.attributedTitle.attribute(NSAttributedString.Key.foregroundColor, at: 0, effectiveRange: nil) as? NSColor)
+        let rgb = try XCTUnwrap(color.usingColorSpace(.sRGB))
+
+        XCTAssertEqual(color.alphaComponent, 1, accuracy: 0.01)
+        XCTAssertLessThan(rgb.redComponent, 0.25)
+        XCTAssertLessThan(rgb.greenComponent, 0.25)
+        XCTAssertLessThan(rgb.blueComponent, 0.25)
+    }
+
     func testDirectoryModeFilesUseTextRowsAndActiveFileState() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("mdreview-files-\(UUID().uuidString)", isDirectory: true)
         let nested = root.appendingPathComponent("guide/advanced", isDirectory: true)
@@ -174,6 +194,8 @@ final class MainWindowLayoutTests: XCTestCase {
                 layoutMode: .filesOutlineAndDocument
             )
         )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+        controller.openFileDrawerForTesting()
         controller.window?.contentView?.layoutSubtreeIfNeeded()
 
         let fileRow = try XCTUnwrap(findSubviews(ofType: SidebarRowButton.self, in: controller.window?.contentView).first {
@@ -249,9 +271,448 @@ final class MainWindowLayoutTests: XCTestCase {
 
         XCTAssertFalse(files.isHidden)
         XCTAssertFalse(outline.isHidden)
-        XCTAssertEqual(files.frame.width / contentWidth, 0.17, accuracy: 0.04)
-        XCTAssertEqual(outline.frame.width / contentWidth, 0.14, accuracy: 0.04)
-        XCTAssertEqual(document.frame.width / contentWidth, 0.69, accuracy: 0.05)
+        XCTAssertEqual(files.frame.width, 28, accuracy: 3)
+        XCTAssertEqual(outline.frame.width / contentWidth, 0.20, accuracy: 0.04)
+        XCTAssertEqual(document.frame.width / contentWidth, 0.75, accuracy: 0.05)
+    }
+
+    func testFolderModeStartsWithEdgeCollapsedFileDirectoryAndVisibleOutline() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-hover-drawer")
+        let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
+                tabs: [tab],
+                activeTabID: tab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(controller.fileDirectoryModeForTesting, .edgeCollapsed)
+        XCTAssertFalse(controller.isFileDrawerVisibleForTesting)
+        XCTAssertTrue(controller.isOutlineVisibleForTesting)
+
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        XCTAssertEqual(splitView.subviews[0].frame.width, 28, accuracy: 3)
+        XCTAssertFalse(splitView.subviews[0].isHidden)
+        XCTAssertFalse(splitView.subviews[1].isHidden)
+        XCTAssertGreaterThan(splitView.subviews[2].frame.width, 700)
+    }
+
+    func testCollapsedFileDirectoryUsesSubtleEdgeTrigger() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-subtle-edge")
+        let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
+                tabs: [tab],
+                activeTabID: tab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let edgeTrigger = try XCTUnwrap(findSubview(ofType: FileEdgeTriggerView.self, in: controller.window?.contentView))
+
+        XCTAssertLessThanOrEqual(edgeTrigger.button.alphaValue, 0.45)
+        XCTAssertLessThanOrEqual(edgeTrigger.button.frame.width, 24)
+        XCTAssertLessThanOrEqual(edgeTrigger.button.frame.height, 24)
+    }
+
+    func testSingleFileModeDoesNotShowFileDirectoryTrigger() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let tab = DocumentTab(url: URL(fileURLWithPath: "/tmp/README.md"))
+        controller.apply(windowModel: WindowModel(tabs: [tab], activeTabID: tab.id, layoutMode: .outlineAndDocument))
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(controller.isSingleFileFileDirectoryHiddenForTesting)
+        XCTAssertNil(visibleButton(label: "打开文件列表", in: controller.window?.contentView))
+        XCTAssertNil(visibleButton(label: "固定文件列表", in: controller.window?.contentView))
+    }
+
+    func testFileDirectoryHoverDrawerOpensAndClosesWithoutResizingDocument() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-hover-drawer")
+        let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
+                tabs: [tab],
+                activeTabID: tab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        let documentMinX = splitView.subviews[2].frame.minX
+
+        controller.openFileDrawerForTesting()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(controller.fileDirectoryModeForTesting, .hoverOpen)
+        XCTAssertTrue(controller.isFileDrawerVisibleForTesting)
+        XCTAssertEqual(splitView.subviews[2].frame.minX, documentMinX, accuracy: 2)
+        XCTAssertNotNil(visibleButton(label: "固定文件列表", in: controller.window?.contentView))
+        XCTAssertNil(visibleButton(label: "展开文件列表", in: controller.window?.contentView))
+        XCTAssertNil(visibleButton(label: "收起文件列表", in: controller.window?.contentView))
+
+        controller.closeFileDrawerForTesting()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(controller.fileDirectoryModeForTesting, .edgeCollapsed)
+        XCTAssertFalse(controller.isFileDrawerVisibleForTesting)
+        XCTAssertEqual(splitView.subviews[2].frame.minX, documentMinX, accuracy: 2)
+    }
+
+    func testPinnedFileDirectoryParticipatesInSplitLayoutAndRestoresWidth() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-pin")
+        let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
+                tabs: [tab],
+                activeTabID: tab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        controller.openFileDrawerForTesting()
+        controller.pinFileDirectoryForTesting()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        XCTAssertEqual(controller.fileDirectoryModeForTesting, .pinned)
+        XCTAssertFalse(controller.isFileDrawerVisibleForTesting)
+        XCTAssertGreaterThan(splitView.subviews[0].frame.width, 240)
+        XCTAssertNotNil(visibleButton(label: "取消固定文件列表", in: controller.window?.contentView))
+        XCTAssertNil(visibleButton(label: "固定文件列表", in: controller.window?.contentView))
+        XCTAssertNil(visibleButton(label: "展开文件列表", in: controller.window?.contentView))
+        XCTAssertNil(visibleButton(label: "收起文件列表", in: controller.window?.contentView))
+
+        splitView.setPosition(330, ofDividerAt: 0)
+        splitView.layoutSubtreeIfNeeded()
+        controller.toggleFiles()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(controller.fileDirectoryModeForTesting, .edgeCollapsed)
+        XCTAssertEqual(splitView.subviews[0].frame.width, 28, accuracy: 3)
+
+        controller.toggleFiles()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(controller.fileDirectoryModeForTesting, .pinned)
+        XCTAssertEqual(splitView.subviews[0].frame.width, 330, accuracy: 4)
+    }
+
+    func testPinnedFileDirectoryUsesDocumentWhiteBackground() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-pin-white")
+        let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
+                tabs: [tab],
+                activeTabID: tab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        controller.pinFileDirectoryForTesting()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        let files = splitView.subviews[0]
+        let color = try XCTUnwrap(files.layer?.backgroundColor.flatMap { NSColor(cgColor: $0) })
+        let rgb = try XCTUnwrap(color.usingColorSpace(.sRGB))
+
+        XCTAssertEqual(color.alphaComponent, 1, accuracy: 0.01)
+        XCTAssertGreaterThan(rgb.redComponent, 0.95)
+        XCTAssertGreaterThan(rgb.greenComponent, 0.95)
+        XCTAssertGreaterThan(rgb.blueComponent, 0.95)
+    }
+
+    func testPinnedFileDirectoryDrawsSubtleTrailingSeparator() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-pin-separator")
+        let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
+                tabs: [tab],
+                activeTabID: tab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        controller.pinFileDirectoryForTesting()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        let files = splitView.subviews[0]
+        let separator = try XCTUnwrap(findSubview(withIdentifier: "file-directory-trailing-separator", in: files))
+        let color = try XCTUnwrap(separator.layer?.backgroundColor.flatMap { NSColor(cgColor: $0) })
+
+        XCTAssertFalse(separator.isHiddenOrHasHiddenAncestor)
+        XCTAssertEqual(separator.frame.width, 1, accuracy: 0.5)
+        XCTAssertEqual(separator.frame.maxX, files.bounds.maxX, accuracy: 1)
+        XCTAssertGreaterThan(color.alphaComponent, 0.05)
+        XCTAssertLessThan(color.alphaComponent, 0.35)
+    }
+
+    func testPinnedFileDirectoryStaysPinnedWhenSelectingAnotherFile() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-pin-selection")
+        let readme = DocumentTab(url: root.appendingPathComponent("README.md"))
+        let guide = DocumentTab(url: root.appendingPathComponent("Guide.md"))
+        let fileTree = [
+            MarkdownNode(type: .file, name: "README.md", path: "README.md", children: []),
+            MarkdownNode(type: .file, name: "Guide.md", path: "Guide.md", children: [])
+        ]
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: fileTree,
+                tabs: [readme, guide],
+                activeTabID: readme.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+        controller.pinFileDirectoryForTesting()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        splitView.setPosition(330, ofDividerAt: 0)
+        splitView.layoutSubtreeIfNeeded()
+
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: fileTree,
+                tabs: [readme, guide],
+                activeTabID: guide.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(controller.fileDirectoryModeForTesting, .pinned)
+        XCTAssertEqual(splitView.subviews[0].frame.width, 330, accuracy: 4)
+        XCTAssertNotNil(visibleButton(label: "取消固定文件列表", in: controller.window?.contentView))
+        XCTAssertNil(visibleButton(label: "打开文件列表", in: controller.window?.contentView))
+    }
+
+    func testFileMenuToggleDoesNotRevealFileDirectoryInSingleFileMode() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let tab = DocumentTab(url: URL(fileURLWithPath: "/tmp/README.md"))
+        controller.apply(windowModel: WindowModel(tabs: [tab], activeTabID: tab.id, layoutMode: .outlineAndDocument))
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        controller.toggleFiles()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(controller.isSingleFileFileDirectoryHiddenForTesting)
+        XCTAssertEqual(controller.fileDirectoryModeForTesting, .edgeCollapsed)
+    }
+
+    func testOutlineUsesContentAreaDirectoryToggle() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-outline-toggle")
+        let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
+                tabs: [tab],
+                activeTabID: tab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        let document = splitView.subviews[2]
+        let toggle = try XCTUnwrap(visibleButton(label: "隐藏目录", in: controller.window?.contentView))
+        let toggleFrame = toggle.convert(toggle.bounds, to: splitView)
+
+        XCTAssertGreaterThanOrEqual(toggleFrame.minX, document.frame.minX + 8)
+        XCTAssertLessThanOrEqual(toggleFrame.minX, document.frame.minX + 42)
+        XCTAssertEqual(toggleFrame.minY, 12, accuracy: 3)
+        XCTAssertNil(visibleButton(label: "收起大纲", in: controller.window?.contentView))
+    }
+
+    func testWideOutlineFillsDraggedNavigationPane() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1400, height: 860))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-wide-outline")
+        let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
+                tabs: [tab],
+                activeTabID: tab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        splitView.setPosition(28, ofDividerAt: 0)
+        splitView.setPosition(720, ofDividerAt: 1)
+        splitView.layoutSubtreeIfNeeded()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let outline = splitView.subviews[1]
+        let outlineScroll = try XCTUnwrap(findSubviews(ofType: NSScrollView.self, in: outline).first)
+
+        XCTAssertGreaterThan(outline.frame.width, 600)
+        XCTAssertGreaterThan(outlineScroll.frame.width / outline.frame.width, 0.90)
+        XCTAssertEqual(outlineScroll.frame.maxX, outline.bounds.maxX - 12, accuracy: 2)
+    }
+
+    func testOutlinePaneUsesDocumentWhiteBackground() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-white-outline")
+        let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
+                tabs: [tab],
+                activeTabID: tab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        let outline = splitView.subviews[1]
+        let color = try XCTUnwrap(outline.layer?.backgroundColor.flatMap { NSColor(cgColor: $0) })
+        let rgb = try XCTUnwrap(color.usingColorSpace(.sRGB))
+
+        XCTAssertEqual(color.alphaComponent, 1, accuracy: 0.01)
+        XCTAssertGreaterThan(rgb.redComponent, 0.95)
+        XCTAssertGreaterThan(rgb.greenComponent, 0.95)
+        XCTAssertGreaterThan(rgb.blueComponent, 0.95)
+    }
+
+    func testOutlineDirectoryToggleHidesAndRestoresPreviousWidth() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-outline-toggle")
+        let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
+                tabs: [tab],
+                activeTabID: tab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        splitView.setPosition(28, ofDividerAt: 0)
+        splitView.setPosition(300, ofDividerAt: 1)
+        splitView.layoutSubtreeIfNeeded()
+        let outlineWidth = splitView.subviews[1].frame.width
+
+        try XCTUnwrap(visibleButton(label: "隐藏目录", in: controller.window?.contentView)).performClick(nil)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertFalse(controller.isOutlineVisibleForTesting)
+        XCTAssertTrue(splitView.subviews[1].isHidden)
+        XCTAssertNotNil(visibleButton(label: "显示目录", in: controller.window?.contentView))
+
+        try XCTUnwrap(visibleButton(label: "显示目录", in: controller.window?.contentView)).performClick(nil)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(controller.isOutlineVisibleForTesting)
+        XCTAssertFalse(splitView.subviews[1].isHidden)
+        XCTAssertEqual(splitView.subviews[1].frame.width, outlineWidth, accuracy: 4)
+    }
+
+    func testOutlineDocumentSeparatorIsNotRendered() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-short-separator")
+        let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
+                tabs: [tab],
+                activeTabID: tab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertNil(findSubview(withIdentifier: "outline-document-short-separator", in: controller.window?.contentView))
+    }
+
+    func testOutlineScrollersDoNotDrawPersistentDividerTracks() {
+        let sidebar = SidebarController()
+
+        XCTAssertTrue(sidebar.outlineView.hasVerticalScroller)
+        XCTAssertTrue(sidebar.outlineView.autohidesScrollers)
+        XCTAssertEqual(sidebar.outlineView.scrollerStyle, .overlay)
+        XCTAssertFalse(sidebar.outlineView.drawsBackground)
     }
 
     func testSingleFileModeStartsWithApprovedSplitRatio() throws {
@@ -271,8 +732,8 @@ final class MainWindowLayoutTests: XCTestCase {
 
         XCTAssertTrue(files.isHidden)
         XCTAssertFalse(outline.isHidden)
-        XCTAssertEqual(outline.frame.width / visibleWidth, 0.16, accuracy: 0.04)
-        XCTAssertEqual(document.frame.width / visibleWidth, 0.84, accuracy: 0.04)
+        XCTAssertEqual(outline.frame.width / visibleWidth, 0.20, accuracy: 0.04)
+        XCTAssertEqual(document.frame.width / visibleWidth, 0.80, accuracy: 0.04)
     }
 
     func testDividerMovementIsNotResetForSameLayoutMode() throws {
@@ -353,7 +814,7 @@ final class MainWindowLayoutTests: XCTestCase {
         let visibleWidth = outline.frame.width + document.frame.width
 
         XCTAssertTrue(splitView.subviews[0].isHidden)
-        XCTAssertEqual(outline.frame.width / visibleWidth, 0.16, accuracy: 0.04)
+        XCTAssertEqual(outline.frame.width / visibleWidth, 0.20, accuracy: 0.04)
     }
 
     func testMainWindowInitializesToVisibleFrameWithoutFullScreen() {
@@ -368,12 +829,12 @@ final class MainWindowLayoutTests: XCTestCase {
         XCTAssertFalse(controller.window?.styleMask.contains(.fullScreen) ?? true)
     }
 
-    func testFolderModeFileListCollapsesToRailAndExpandsToPreviousWidth() throws {
+    func testSplitViewUsesThinVisualDividerWithWideDragArea() throws {
         let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
         defer { controller.window?.close() }
         controller.showWindow(nil)
 
-        let root = URL(fileURLWithPath: "/tmp/mdreview-collapse")
+        let root = URL(fileURLWithPath: "/tmp/mdreview-divider-style")
         let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
         controller.apply(
             windowModel: WindowModel(
@@ -387,274 +848,14 @@ final class MainWindowLayoutTests: XCTestCase {
         controller.window?.contentView?.layoutSubtreeIfNeeded()
 
         let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
-        splitView.setPosition(260, ofDividerAt: 0)
-        splitView.setPosition(460, ofDividerAt: 1)
-        splitView.layoutSubtreeIfNeeded()
 
-        controller.toggleFiles()
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        XCTAssertFalse(splitView.subviews[0].isHidden)
-        XCTAssertFalse(splitView.subviews[1].isHidden)
-        XCTAssertEqual(splitView.subviews[0].frame.width, 28, accuracy: 2)
-        XCTAssertGreaterThan(splitView.subviews[1].frame.width, 180)
-        XCTAssertGreaterThan(splitView.subviews[2].frame.width, 500)
-
-        let expandButton = try XCTUnwrap(findSubviews(ofType: NSButton.self, in: controller.window?.contentView).first {
-            $0.accessibilityLabel() == "展开文件列表"
-        })
-        expandButton.performClick(nil)
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        XCTAssertEqual(splitView.subviews[0].frame.width, 260, accuracy: 3)
-    }
-
-    func testFolderModeOutlineCollapsesToRailAndExpandsToPreviousWidth() throws {
-        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
-        defer { controller.window?.close() }
-        controller.showWindow(nil)
-
-        let root = URL(fileURLWithPath: "/tmp/mdreview-collapse")
-        let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
-        controller.apply(
-            windowModel: WindowModel(
-                workspaceRoot: root,
-                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
-                tabs: [tab],
-                activeTabID: tab.id,
-                layoutMode: .filesOutlineAndDocument
-            )
-        )
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
-        splitView.setPosition(240, ofDividerAt: 0)
-        splitView.setPosition(450, ofDividerAt: 1)
-        splitView.layoutSubtreeIfNeeded()
-
-        controller.toggleOutline()
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        XCTAssertFalse(splitView.subviews[0].isHidden)
-        XCTAssertFalse(splitView.subviews[1].isHidden)
-        XCTAssertEqual(splitView.subviews[0].frame.width, 240, accuracy: 3)
-        XCTAssertEqual(splitView.subviews[1].frame.width, 28, accuracy: 2)
-        XCTAssertGreaterThan(splitView.subviews[2].frame.width, 700)
-
-        let expandButton = try XCTUnwrap(findSubviews(ofType: NSButton.self, in: controller.window?.contentView).first {
-            $0.accessibilityLabel() == "展开大纲"
-        })
-        expandButton.performClick(nil)
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        XCTAssertEqual(splitView.subviews[1].frame.width, 210, accuracy: 3)
-    }
-
-    func testSingleFileOutlineCollapsesWithoutShowingFileRail() throws {
-        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
-        defer { controller.window?.close() }
-        controller.showWindow(nil)
-
-        let tab = DocumentTab(url: URL(fileURLWithPath: "/tmp/README.md"))
-        controller.apply(windowModel: WindowModel(tabs: [tab], activeTabID: tab.id, layoutMode: .outlineAndDocument))
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
-        splitView.setPosition(0, ofDividerAt: 0)
-        splitView.setPosition(220, ofDividerAt: 1)
-        splitView.layoutSubtreeIfNeeded()
-
-        controller.toggleFiles()
-        controller.toggleOutline()
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        XCTAssertTrue(splitView.subviews[0].isHidden)
-        XCTAssertFalse(splitView.subviews[1].isHidden)
-        XCTAssertEqual(splitView.subviews[1].frame.width, 28, accuracy: 2)
-        XCTAssertNil(findSubviews(ofType: NSButton.self, in: controller.window?.contentView).first {
-            $0.accessibilityLabel() == "展开文件列表"
-        })
-
-        let expandButton = try XCTUnwrap(findSubviews(ofType: NSButton.self, in: controller.window?.contentView).first {
-            $0.accessibilityLabel() == "展开大纲"
-        })
-        expandButton.performClick(nil)
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        XCTAssertEqual(splitView.subviews[1].frame.width, 220, accuracy: 3)
-    }
-
-    func testSameLayoutApplyKeepsFileListCollapsed() throws {
-        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
-        defer { controller.window?.close() }
-        controller.showWindow(nil)
-
-        let root = URL(fileURLWithPath: "/tmp/mdreview-collapse")
-        let first = DocumentTab(url: root.appendingPathComponent("README.md"))
-        let second = DocumentTab(url: root.appendingPathComponent("Guide.md"))
-        let tree = [
-            MarkdownNode(type: .file, name: "README.md", path: "README.md", children: []),
-            MarkdownNode(type: .file, name: "Guide.md", path: "Guide.md", children: [])
-        ]
-
-        controller.apply(
-            windowModel: WindowModel(
-                workspaceRoot: root,
-                fileTree: tree,
-                tabs: [first],
-                activeTabID: first.id,
-                layoutMode: .filesOutlineAndDocument
-            )
-        )
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-        controller.toggleFiles()
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        controller.apply(
-            windowModel: WindowModel(
-                workspaceRoot: root,
-                fileTree: tree,
-                tabs: [second],
-                activeTabID: second.id,
-                layoutMode: .filesOutlineAndDocument
-            )
-        )
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
-        XCTAssertFalse(splitView.subviews[0].isHidden)
-        XCTAssertEqual(splitView.subviews[0].frame.width, 28, accuracy: 2)
-        XCTAssertNotNil(findSubviews(ofType: NSButton.self, in: controller.window?.contentView).first {
-            $0.accessibilityLabel() == "展开文件列表"
-        })
-    }
-
-    func testFolderModeShowsDividerCenteredCollapseControls() throws {
-        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
-        defer { controller.window?.close() }
-        controller.showWindow(nil)
-
-        let root = URL(fileURLWithPath: "/tmp/mdreview-divider-controls")
-        let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
-        controller.apply(
-            windowModel: WindowModel(
-                workspaceRoot: root,
-                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
-                tabs: [tab],
-                activeTabID: tab.id,
-                layoutMode: .filesOutlineAndDocument
-            )
-        )
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
-        let fileCollapse = try XCTUnwrap(visibleButton(label: "收起文件列表", in: controller.window?.contentView))
-        let outlineCollapse = try XCTUnwrap(visibleButton(label: "收起大纲", in: controller.window?.contentView))
-
-        let fileFrame = fileCollapse.convert(fileCollapse.bounds, to: splitView)
-        let outlineFrame = outlineCollapse.convert(outlineCollapse.bounds, to: splitView)
-
-        XCTAssertEqual(fileCollapse.frame.width, 22, accuracy: 1)
-        XCTAssertEqual(fileCollapse.frame.height, 22, accuracy: 1)
-        XCTAssertEqual(outlineCollapse.frame.width, 22, accuracy: 1)
-        XCTAssertEqual(outlineCollapse.frame.height, 22, accuracy: 1)
-        XCTAssertEqual(fileFrame.midY, splitView.bounds.midY, accuracy: 2)
-        XCTAssertEqual(outlineFrame.midY, splitView.bounds.midY, accuracy: 2)
-    }
-
-    func testDividerControlCollapsesAndExpandsFileList() throws {
-        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
-        defer { controller.window?.close() }
-        controller.showWindow(nil)
-
-        let root = URL(fileURLWithPath: "/tmp/mdreview-divider-controls")
-        let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
-        controller.apply(
-            windowModel: WindowModel(
-                workspaceRoot: root,
-                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
-                tabs: [tab],
-                activeTabID: tab.id,
-                layoutMode: .filesOutlineAndDocument
-            )
-        )
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
-        splitView.setPosition(260, ofDividerAt: 0)
-        splitView.setPosition(460, ofDividerAt: 1)
-        splitView.layoutSubtreeIfNeeded()
-
-        try XCTUnwrap(visibleButton(label: "收起文件列表", in: controller.window?.contentView)).performClick(nil)
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        XCTAssertEqual(splitView.subviews[0].frame.width, 28, accuracy: 2)
-
-        try XCTUnwrap(visibleButton(label: "展开文件列表", in: controller.window?.contentView)).performClick(nil)
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        XCTAssertEqual(splitView.subviews[0].frame.width, 260, accuracy: 3)
-    }
-
-    func testDividerControlCollapsesAndExpandsOutline() throws {
-        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
-        defer { controller.window?.close() }
-        controller.showWindow(nil)
-
-        let root = URL(fileURLWithPath: "/tmp/mdreview-divider-controls")
-        let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
-        controller.apply(
-            windowModel: WindowModel(
-                workspaceRoot: root,
-                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
-                tabs: [tab],
-                activeTabID: tab.id,
-                layoutMode: .filesOutlineAndDocument
-            )
-        )
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
-        splitView.setPosition(240, ofDividerAt: 0)
-        splitView.setPosition(450, ofDividerAt: 1)
-        splitView.layoutSubtreeIfNeeded()
-
-        try XCTUnwrap(visibleButton(label: "收起大纲", in: controller.window?.contentView)).performClick(nil)
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        XCTAssertEqual(splitView.subviews[1].frame.width, 28, accuracy: 2)
-
-        try XCTUnwrap(visibleButton(label: "展开大纲", in: controller.window?.contentView)).performClick(nil)
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        XCTAssertEqual(splitView.subviews[1].frame.width, 210, accuracy: 3)
-    }
-
-    func testSingleFileModeShowsOnlyOutlineDividerControl() throws {
-        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
-        defer { controller.window?.close() }
-        controller.showWindow(nil)
-
-        let tab = DocumentTab(url: URL(fileURLWithPath: "/tmp/README.md"))
-        controller.apply(windowModel: WindowModel(tabs: [tab], activeTabID: tab.id, layoutMode: .outlineAndDocument))
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
-
-        XCTAssertNil(visibleButton(label: "收起文件列表", in: controller.window?.contentView))
-        XCTAssertNil(visibleButton(label: "展开文件列表", in: controller.window?.contentView))
-
-        try XCTUnwrap(visibleButton(label: "收起大纲", in: controller.window?.contentView)).performClick(nil)
-        controller.window?.contentView?.layoutSubtreeIfNeeded()
-
-        XCTAssertTrue(splitView.subviews[0].isHidden)
-        XCTAssertEqual(splitView.subviews[1].frame.width, 28, accuracy: 2)
-        XCTAssertNotNil(visibleButton(label: "展开大纲", in: controller.window?.contentView))
+        XCTAssertEqual(splitView.dividerStyle, .thin)
+        XCTAssertGreaterThanOrEqual(splitView.dividerThickness, 8)
     }
 
     private func visibleButton(label: String, in view: NSView?) -> NSButton? {
         findSubviews(ofType: NSButton.self, in: view).first {
-            !$0.isHidden && $0.accessibilityLabel() == label
+            !$0.isHiddenOrHasHiddenAncestor && $0.accessibilityLabel() == label
         }
     }
 
@@ -679,5 +880,18 @@ final class MainWindowLayoutTests: XCTestCase {
             matches.append(contentsOf: findSubviews(ofType: type, in: subview))
         }
         return matches
+    }
+
+    private func findSubview(withIdentifier identifier: String, in view: NSView?) -> NSView? {
+        guard let view else { return nil }
+        if view.identifier?.rawValue == identifier {
+            return view
+        }
+        for subview in view.subviews {
+            if let match = findSubview(withIdentifier: identifier, in: subview) {
+                return match
+            }
+        }
+        return nil
     }
 }

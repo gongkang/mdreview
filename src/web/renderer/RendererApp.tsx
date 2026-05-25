@@ -10,22 +10,35 @@ export type RenderDocumentMessage = {
   name: string;
   content: string;
   scrollPosition?: number;
+  readerLayout?: ReaderLayout;
 };
+
+type ReaderLayout = "centered" | "withOutline";
 
 export function RendererApp() {
   const bridge = useMemo(() => createNativeBridge(), []);
   const [document, setDocument] = useState<RenderDocumentMessage | null>(window.__mdreviewPendingDocument ?? null);
+  const [readerLayout, setReaderLayout] = useState<ReaderLayout>(
+    window.__mdreviewPendingReaderLayout ?? window.__mdreviewPendingDocument?.readerLayout ?? "centered"
+  );
 
   useEffect(() => {
     window.__mdreviewRenderDocument = (message) => {
       window.__mdreviewPendingDocument = message;
       setDocument(message);
+      setReaderLayout(message.readerLayout ?? "centered");
+    };
+    window.__mdreviewSetReaderLayout = (layout) => {
+      window.__mdreviewPendingReaderLayout = layout;
+      setReaderLayout(layout);
     };
     if (window.__mdreviewPendingDocument) {
       setDocument(window.__mdreviewPendingDocument);
+      setReaderLayout(window.__mdreviewPendingDocument.readerLayout ?? window.__mdreviewPendingReaderLayout ?? "centered");
     }
     return () => {
       delete window.__mdreviewRenderDocument;
+      delete window.__mdreviewSetReaderLayout;
     };
   }, []);
 
@@ -38,7 +51,7 @@ export function RendererApp() {
   }
 
   return (
-    <main className="native-reader">
+    <main className={`native-reader ${readerLayout === "withOutline" ? "native-reader--with-outline" : ""}`}>
       <article className="markdown-body">
         <MarkdownView content={rewriteMarkdownResources(document.content)} enableCodeCopy onOutline={onOutline} />
       </article>
@@ -49,6 +62,8 @@ export function RendererApp() {
 declare global {
   interface Window {
     __mdreviewRenderDocument?: (message: RenderDocumentMessage) => void;
+    __mdreviewSetReaderLayout?: (layout: ReaderLayout) => void;
     __mdreviewPendingDocument?: RenderDocumentMessage;
+    __mdreviewPendingReaderLayout?: ReaderLayout;
   }
 }

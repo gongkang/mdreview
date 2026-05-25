@@ -1,10 +1,18 @@
 import AppKit
 import MdreviewCore
 
+enum FileDirectoryMode: Equatable {
+    case edgeCollapsed
+    case hoverOpen
+    case pinned
+}
+
 final class MainWindowController: NSWindowController {
-    private let splitView = NSSplitView()
-    private lazy var fileDividerButton = makeDividerButton(action: #selector(toggleFilesFromDivider))
-    private lazy var outlineDividerButton = makeDividerButton(action: #selector(toggleOutlineFromDivider))
+    private let splitView = ReaderSplitView()
+    private lazy var outlineToggleButton = makeNavigationIconButton(
+        symbolName: "list.bullet",
+        action: #selector(toggleOutlineFromNavigationButton)
+    )
     private let tabBar = DocumentTabBar()
     private let sidebar = SidebarController()
     private let resourceHandler = ResourceSchemeHandler()
@@ -18,20 +26,17 @@ final class MainWindowController: NSWindowController {
     private var settings: AppSettings
     private var lastAppliedLayoutMode: LayoutMode?
     private var isDeferringSplitRatioApplication = false
-    private var isFilesCollapsed = false
-    private var isOutlineCollapsed = false
-    private var lastExpandedFilesWidth: CGFloat?
-    private var lastExpandedOutlineWidth: CGFloat?
+    private var fileDirectoryMode: FileDirectoryMode = .edgeCollapsed
+    private var isOutlineVisible = true
+    private var lastPinnedFilesWidth: CGFloat?
+    private var lastOutlineWidth: CGFloat?
     private(set) var modelID: UUID?
 
     private enum SplitRatio {
-        static let folderFiles: CGFloat = 0.17
-        static let folderOutline: CGFloat = 0.14
-        static let singleFileOutline: CGFloat = 0.16
-    }
-
-    private enum SidebarCollapse {
-        static let railWidth: CGFloat = 28
+        static let fileEdge: CGFloat = 28
+        static let pinnedFolderFiles: CGFloat = 0.24
+        static let folderOutline: CGFloat = 0.20
+        static let singleFileOutline: CGFloat = 0.20
     }
 
     convenience init(
@@ -61,6 +66,23 @@ final class MainWindowController: NSWindowController {
         super.init(coder: coder)
     }
 
+    var fileDirectoryModeForTesting: FileDirectoryMode {
+        fileDirectoryMode
+    }
+
+    var isFileDrawerVisibleForTesting: Bool {
+        fileDirectoryMode == .hoverOpen
+    }
+
+    var isOutlineVisibleForTesting: Bool {
+        isOutlineVisible
+    }
+
+    var isSingleFileFileDirectoryHiddenForTesting: Bool {
+        guard currentWindowModel?.layoutMode == .outlineAndDocument else { return false }
+        return sidebar.filesContainer.isHidden
+    }
+
     override func windowDidLoad() {
         super.windowDidLoad()
         buildLayout()
@@ -76,8 +98,8 @@ final class MainWindowController: NSWindowController {
         splitView.delegate = self
         root.addSubview(tabBar.view)
         root.addSubview(splitView)
-        root.addSubview(fileDividerButton)
-        root.addSubview(outlineDividerButton)
+        root.addSubview(sidebar.fileDrawerView)
+        root.addSubview(outlineToggleButton)
         NSLayoutConstraint.activate([
             tabBar.view.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             tabBar.view.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -86,7 +108,11 @@ final class MainWindowController: NSWindowController {
             splitView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             splitView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             splitView.topAnchor.constraint(equalTo: tabBar.view.bottomAnchor),
-            splitView.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+            splitView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            sidebar.fileDrawerView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            sidebar.fileDrawerView.topAnchor.constraint(equalTo: tabBar.view.bottomAnchor),
+            sidebar.fileDrawerView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            sidebar.fileDrawerView.widthAnchor.constraint(equalToConstant: 286)
         ])
         sidebar.filesContainer.translatesAutoresizingMaskIntoConstraints = false
         sidebar.outlineContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -100,6 +126,7 @@ final class MainWindowController: NSWindowController {
         sidebar.onSelectFile = { [weak self] relativePath in
             guard let self, let root = self.currentWorkspaceRoot else { return }
             self.onOpenWorkspaceFile?(root.appendingPathComponent(relativePath))
+            self.closeFileDrawerIfTemporary()
         }
         sidebar.onSelectHeading = { [weak self] id in
             self?.renderer.scrollToHeading(id: id)
@@ -110,24 +137,43 @@ final class MainWindowController: NSWindowController {
         tabBar.onSelectTab = { [weak self] tabID in
             self?.onSelectTab?(tabID)
         }
-        updateDividerControls()
+        sidebar.configureFileDirectoryActions(
+            open: { [weak self] in self?.openFileDrawer() },
+            pin: { [weak self] in self?.pinFileDirectory() },
+            unpin: { [weak self] in self?.collapseFileDirectoryToEdge() },
+            drawerMouseExit: { [weak self] in self?.closeFileDrawerIfTemporary() }
+        )
+        updateNavigationControls()
     }
 
-    private func makeDividerButton(action: Selector) -> DividerButton {
-        let button = DividerButton(frame: NSRect(x: 0, y: 0, width: 22, height: 22))
+    private func makeNavigationIconButton(symbolName: String, action: Selector) -> NSButton {
+        let button = NSButton(frame: NSRect(x: 0, y: 0, width: 28, height: 28))
         button.translatesAutoresizingMaskIntoConstraints = true
+        button.setButtonType(.momentaryChange)
+        button.isBordered = false
+        button.bezelStyle = .regularSquare
+        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        button.imagePosition = .imageOnly
         button.target = self
         button.action = action
         button.isHidden = true
         return button
     }
 
-    @objc private func toggleFilesFromDivider() {
-        toggleFiles()
+    @objc private func toggleOutlineFromNavigationButton() {
+        toggleOutline()
     }
 
-    @objc private func toggleOutlineFromDivider() {
-        toggleOutline()
+    func openFileDrawerForTesting() {
+        openFileDrawer()
+    }
+
+    func closeFileDrawerForTesting() {
+        closeFileDrawerIfTemporary()
+    }
+
+    func pinFileDirectoryForTesting() {
+        pinFileDirectory()
     }
 
     func apply(windowModel: WindowModel) {
@@ -139,7 +185,7 @@ final class MainWindowController: NSWindowController {
         lastAppliedLayoutMode = windowModel.layoutMode
         sidebar.apply(layoutMode: windowModel.layoutMode)
         if shouldApplyDefaultRatio {
-            resetCollapsedState(for: windowModel.layoutMode)
+            resetNavigationState(for: windowModel.layoutMode)
         }
         let active = windowModel.tabs.first(where: { $0.id == windowModel.activeTabID })
         let activeRelativePath = active.flatMap { tab -> String? in
@@ -154,80 +200,46 @@ final class MainWindowController: NSWindowController {
         }
         watch(activeTab: active, workspaceRoot: windowModel.workspaceRoot)
         applyDefaultSplitRatioIfNeeded(for: windowModel.layoutMode, force: shouldApplyDefaultRatio)
-        updateDividerControls(for: windowModel.layoutMode)
+        updateNavigationControls(for: windowModel.layoutMode)
     }
 
-    private func resetCollapsedState(for layoutMode: LayoutMode) {
-        isFilesCollapsed = false
-        isOutlineCollapsed = false
-        lastExpandedFilesWidth = nil
-        lastExpandedOutlineWidth = nil
+    private func resetNavigationState(for layoutMode: LayoutMode) {
+        fileDirectoryMode = .edgeCollapsed
+        isOutlineVisible = true
+        lastPinnedFilesWidth = nil
+        lastOutlineWidth = nil
         sidebar.setFilesCollapsed(false)
         sidebar.setOutlineCollapsed(false)
-        if layoutMode == .outlineAndDocument {
+        sidebar.outlineContainer.isHidden = false
+        switch layoutMode {
+        case .filesOutlineAndDocument:
+            sidebar.filesContainer.isHidden = false
+        case .outlineAndDocument:
             sidebar.filesContainer.isHidden = true
         }
-        updateDividerControls(for: layoutMode)
+        updateNavigationControls(for: layoutMode)
     }
 
-    private func updateDividerControls(for layoutMode: LayoutMode? = nil) {
+    private func updateNavigationControls(for layoutMode: LayoutMode? = nil) {
         let mode = layoutMode ?? currentWindowModel?.layoutMode
-
-        if mode == .filesOutlineAndDocument {
-            fileDividerButton.isHidden = false
-            configureDividerButton(
-                fileDividerButton,
-                collapsed: isFilesCollapsed,
-                collapseLabel: "收起文件列表",
-                expandLabel: "展开文件列表"
-            )
-        } else {
-            clearDividerButton(fileDividerButton)
-        }
-
-        if mode == nil {
-            clearDividerButton(outlineDividerButton)
-        } else {
-            outlineDividerButton.isHidden = false
-            configureDividerButton(
-                outlineDividerButton,
-                collapsed: isOutlineCollapsed,
-                collapseLabel: "收起大纲",
-                expandLabel: "展开大纲"
-            )
-        }
-        layoutDividerButtons()
+        let outlineLabel = isOutlineVisible ? "隐藏目录" : "显示目录"
+        outlineToggleButton.isHidden = mode == nil
+        outlineToggleButton.setAccessibilityLabel(outlineLabel)
+        outlineToggleButton.toolTip = outlineLabel
+        layoutNavigationControls()
     }
 
-    private func configureDividerButton(_ button: DividerButton, collapsed: Bool, collapseLabel: String, expandLabel: String) {
-        let label = collapsed ? expandLabel : collapseLabel
-        let symbolName = collapsed ? "chevron.right" : "chevron.left"
-        button.setSymbolName(symbolName)
-        button.setAccessibilityLabel(label)
-        button.toolTip = label
-    }
-
-    private func clearDividerButton(_ button: DividerButton) {
-        button.isHidden = true
-        button.clearSymbol()
-        button.setAccessibilityLabel(nil)
-        button.toolTip = nil
-    }
-
-    private func layoutDividerButtons() {
-        guard window?.contentView != nil else { return }
-        positionDividerButton(fileDividerButton, atSplitX: sidebar.filesContainer.frame.maxX)
-        positionDividerButton(outlineDividerButton, atSplitX: sidebar.outlineContainer.frame.maxX)
-    }
-
-    private func positionDividerButton(_ button: DividerButton, atSplitX splitX: CGFloat) {
-        guard !button.isHidden, let root = window?.contentView else { return }
-        let center = splitView.convert(NSPoint(x: splitX, y: splitView.bounds.midY), to: root)
-        button.frame = NSRect(
-            x: round(center.x - button.bounds.width / 2),
-            y: round(center.y - button.bounds.height / 2),
-            width: button.bounds.width,
-            height: button.bounds.height
+    private func layoutNavigationControls() {
+        guard !outlineToggleButton.isHidden, let root = window?.contentView else { return }
+        let origin = splitView.convert(
+            NSPoint(x: renderer.view.frame.minX + 14, y: 12 + outlineToggleButton.bounds.height),
+            to: root
+        )
+        outlineToggleButton.frame = NSRect(
+            x: round(origin.x),
+            y: round(origin.y),
+            width: outlineToggleButton.bounds.width,
+            height: outlineToggleButton.bounds.height
         )
     }
 
@@ -250,17 +262,22 @@ final class MainWindowController: NSWindowController {
         switch layoutMode {
         case .filesOutlineAndDocument:
             sidebar.filesContainer.isHidden = false
-            splitView.setPosition(totalWidth * SplitRatio.folderFiles, ofDividerAt: 0)
-            splitView.setPosition(totalWidth * (SplitRatio.folderFiles + SplitRatio.folderOutline), ofDividerAt: 1)
-            splitView.setPosition(totalWidth * SplitRatio.folderFiles, ofDividerAt: 0)
+            sidebar.outlineContainer.isHidden = !isOutlineVisible
+            splitView.setPosition(SplitRatio.fileEdge, ofDividerAt: 0)
+            splitView.setPosition(
+                SplitRatio.fileEdge + totalWidth * SplitRatio.folderOutline + splitView.dividerThickness,
+                ofDividerAt: 1
+            )
+            splitView.setPosition(SplitRatio.fileEdge, ofDividerAt: 0)
         case .outlineAndDocument:
             sidebar.filesContainer.isHidden = true
+            sidebar.outlineContainer.isHidden = !isOutlineVisible
             splitView.setPosition(0, ofDividerAt: 0)
-            splitView.setPosition(totalWidth * SplitRatio.singleFileOutline, ofDividerAt: 1)
+            splitView.setPosition(totalWidth * SplitRatio.singleFileOutline + splitView.dividerThickness, ofDividerAt: 1)
         }
 
         splitView.layoutSubtreeIfNeeded()
-        layoutDividerButtons()
+        layoutNavigationControls()
     }
 
     private func render(tab: DocumentTab, workspaceRoot: URL?) {
@@ -269,103 +286,154 @@ final class MainWindowController: NSWindowController {
         do {
             let content = try String(contentsOf: tab.url, encoding: .utf8)
             sidebar.renderOutline(MarkdownOutline.parse(content))
-            renderer.render(path: tab.url.path, name: tab.title, content: content, scrollPosition: tab.scrollPosition)
+            renderer.render(
+                path: tab.url.path,
+                name: tab.title,
+                content: content,
+                scrollPosition: tab.scrollPosition,
+                readerLayout: currentReaderLayout
+            )
         } catch {
             let message = "文件不存在：\(tab.url.path)"
             sidebar.renderOutline(MarkdownOutline.parse(message))
-            renderer.render(path: tab.url.path, name: tab.title, content: message, scrollPosition: tab.scrollPosition)
+            renderer.render(
+                path: tab.url.path,
+                name: tab.title,
+                content: message,
+                scrollPosition: tab.scrollPosition,
+                readerLayout: currentReaderLayout
+            )
         }
+    }
+
+    private var currentReaderLayout: ReaderLayout {
+        isOutlineVisible ? .withOutline : .centered
     }
 
     func toggleFiles() {
         guard currentWindowModel?.layoutMode == .filesOutlineAndDocument else { return }
-        if isFilesCollapsed {
-            expandFiles()
+        if fileDirectoryMode == .pinned {
+            collapseFileDirectoryToEdge()
         } else {
-            collapseFiles()
+            pinFileDirectory()
         }
+    }
+
+    private func openFileDrawer() {
+        guard currentWindowModel?.layoutMode == .filesOutlineAndDocument else { return }
+        guard fileDirectoryMode != .pinned else { return }
+        fileDirectoryMode = .hoverOpen
+        sidebar.showFileDrawer(true)
+        updateNavigationControls()
+    }
+
+    private func closeFileDrawerIfTemporary() {
+        guard fileDirectoryMode == .hoverOpen else { return }
+        fileDirectoryMode = .edgeCollapsed
+        sidebar.showFileDrawer(false)
+        updateNavigationControls()
+    }
+
+    private func collapseFileDirectoryToEdge() {
+        guard currentWindowModel?.layoutMode == .filesOutlineAndDocument else { return }
+        if fileDirectoryMode == .pinned {
+            let currentWidth = splitView.subviews[0].frame.width
+            if currentWidth > SplitRatio.fileEdge {
+                lastPinnedFilesWidth = currentWidth
+            }
+        }
+        fileDirectoryMode = .edgeCollapsed
+        sidebar.showFileEdgeTrigger()
+        sidebar.showFileDrawer(false)
+        splitView.setPosition(SplitRatio.fileEdge, ofDividerAt: 0)
+        if isOutlineVisible {
+            restoreOutlinePositionAfterFileWidthChange(fileWidth: SplitRatio.fileEdge)
+        }
+        splitView.setPosition(SplitRatio.fileEdge, ofDividerAt: 0)
+        splitView.layoutSubtreeIfNeeded()
+        updateNavigationControls()
+    }
+
+    private func pinFileDirectory() {
+        guard currentWindowModel?.layoutMode == .filesOutlineAndDocument else { return }
+        splitView.layoutSubtreeIfNeeded()
+
+        let targetWidth = lastPinnedFilesWidth ?? max(
+            SplitRatio.fileEdge,
+            splitView.bounds.width * SplitRatio.pinnedFolderFiles
+        )
+        fileDirectoryMode = .pinned
+        sidebar.showPinnedFilesPane()
+        sidebar.showFileDrawer(false)
+        splitView.setPosition(targetWidth, ofDividerAt: 0)
+        restoreOutlinePositionAfterFileWidthChange(fileWidth: targetWidth)
+        splitView.setPosition(targetWidth, ofDividerAt: 0)
+        splitView.layoutSubtreeIfNeeded()
+        updateNavigationControls()
+    }
+
+    private func restoreOutlinePositionAfterFileWidthChange(fileWidth: CGFloat) {
+        guard isOutlineVisible else { return }
+        let outlineWidth = lastOutlineWidth ?? splitView.bounds.width * SplitRatio.folderOutline
+        splitView.setPosition(fileWidth + outlineWidth + splitView.dividerThickness, ofDividerAt: 1)
     }
 
     func toggleOutline() {
-        if isOutlineCollapsed {
-            expandOutline()
+        if isOutlineVisible {
+            hideOutlineNavigation()
         } else {
-            collapseOutline()
+            showOutlineNavigation()
         }
     }
 
-    private func collapseFiles() {
-        guard currentWindowModel?.layoutMode == .filesOutlineAndDocument else { return }
-        guard !isFilesCollapsed else { return }
-        splitView.layoutSubtreeIfNeeded()
-        let currentWidth = splitView.subviews[0].frame.width
-        if currentWidth > SidebarCollapse.railWidth {
-            lastExpandedFilesWidth = currentWidth
-        }
-        isFilesCollapsed = true
-        sidebar.setFilesCollapsed(true)
-        updateDividerControls()
-        splitView.setPosition(SidebarCollapse.railWidth, ofDividerAt: 0)
-        splitView.layoutSubtreeIfNeeded()
-        layoutDividerButtons()
-    }
-
-    private func expandFiles() {
-        guard currentWindowModel?.layoutMode == .filesOutlineAndDocument else { return }
-        guard isFilesCollapsed else { return }
-        splitView.layoutSubtreeIfNeeded()
-        let targetWidth = lastExpandedFilesWidth ?? splitView.bounds.width * SplitRatio.folderFiles
-        isFilesCollapsed = false
-        sidebar.setFilesCollapsed(false)
-        updateDividerControls()
-        splitView.setPosition(targetWidth, ofDividerAt: 0)
-        splitView.layoutSubtreeIfNeeded()
-        layoutDividerButtons()
-    }
-
-    private func collapseOutline() {
-        guard !isOutlineCollapsed else { return }
+    private func hideOutlineNavigation() {
+        guard isOutlineVisible else { return }
         splitView.layoutSubtreeIfNeeded()
         let currentWidth = splitView.subviews[1].frame.width
-        if currentWidth > SidebarCollapse.railWidth {
-            lastExpandedOutlineWidth = currentWidth + splitView.dividerThickness
+        if currentWidth > 0 {
+            lastOutlineWidth = currentWidth
         }
-        isOutlineCollapsed = true
+        isOutlineVisible = false
         sidebar.setOutlineCollapsed(true)
-        updateDividerControls()
-        setOutlineWidth(SidebarCollapse.railWidth)
-    }
+        sidebar.outlineContainer.isHidden = true
 
-    private func expandOutline() {
-        guard isOutlineCollapsed else { return }
-        splitView.layoutSubtreeIfNeeded()
-        let targetWidth: CGFloat
-        if let lastExpandedOutlineWidth {
-            targetWidth = lastExpandedOutlineWidth
-        } else if currentWindowModel?.layoutMode == .filesOutlineAndDocument {
-            targetWidth = splitView.bounds.width * SplitRatio.folderOutline
+        if currentWindowModel?.layoutMode == .outlineAndDocument {
+            splitView.setPosition(0, ofDividerAt: 0)
+            splitView.setPosition(0, ofDividerAt: 1)
         } else {
-            targetWidth = splitView.bounds.width * SplitRatio.singleFileOutline
+            let fileWidth = splitView.subviews[0].frame.width
+            splitView.setPosition(fileWidth, ofDividerAt: 1)
         }
-        isOutlineCollapsed = false
-        sidebar.setOutlineCollapsed(false)
-        updateDividerControls()
-        setOutlineWidth(targetWidth)
+
+        splitView.layoutSubtreeIfNeeded()
+        renderer.setReaderLayout(currentReaderLayout)
+        updateNavigationControls()
     }
 
-    private func setOutlineWidth(_ outlineWidth: CGFloat) {
-        splitView.layoutSubtreeIfNeeded()
-        let adjustedOutlineWidth = outlineWidth + splitView.dividerThickness
+    private func showOutlineNavigation() {
+        guard !isOutlineVisible else { return }
+        let targetWidth = lastOutlineWidth ?? splitView.bounds.width * (
+            currentWindowModel?.layoutMode == .outlineAndDocument
+                ? SplitRatio.singleFileOutline
+                : SplitRatio.folderOutline
+        )
+        isOutlineVisible = true
+        sidebar.outlineContainer.isHidden = false
+        sidebar.setOutlineCollapsed(false)
+
         if currentWindowModel?.layoutMode == .outlineAndDocument {
             sidebar.filesContainer.isHidden = true
             splitView.setPosition(0, ofDividerAt: 0)
-            splitView.setPosition(adjustedOutlineWidth, ofDividerAt: 1)
+            splitView.setPosition(targetWidth + splitView.dividerThickness, ofDividerAt: 1)
         } else {
-            let filesWidth = splitView.subviews[0].frame.width
-            splitView.setPosition(filesWidth + adjustedOutlineWidth, ofDividerAt: 1)
+            let fileWidth = splitView.subviews[0].frame.width
+            splitView.setPosition(fileWidth + targetWidth + splitView.dividerThickness, ofDividerAt: 1)
+            splitView.setPosition(fileWidth, ofDividerAt: 0)
         }
+
         splitView.layoutSubtreeIfNeeded()
-        layoutDividerButtons()
+        renderer.setReaderLayout(currentReaderLayout)
+        updateNavigationControls()
     }
 
     func reloadDocument() {
@@ -387,54 +455,33 @@ final class MainWindowController: NSWindowController {
     }
 }
 
-private final class DividerButton: NSButton {
-    private let symbolView = NSImageView()
+final class ReaderSplitView: NSSplitView {
+    private enum Divider {
+        static let dragWidth: CGFloat = 10
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        configure()
+        dividerStyle = .thin
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
-        configure()
+        dividerStyle = .thin
     }
 
-    func setSymbolName(_ symbolName: String) {
-        symbolView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+    override var dividerThickness: CGFloat {
+        Divider.dragWidth
     }
 
-    func clearSymbol() {
-        symbolView.image = nil
-    }
-
-    private func configure() {
-        title = ""
-        setButtonType(.momentaryChange)
-        isBordered = false
-        bezelStyle = .regularSquare
-        focusRingType = .none
-        wantsLayer = true
-        layer?.cornerRadius = 11
-        layer?.borderWidth = 0.5
-        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.35).cgColor
-        layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.92).cgColor
-
-        symbolView.translatesAutoresizingMaskIntoConstraints = false
-        symbolView.contentTintColor = .secondaryLabelColor
-        symbolView.imageScaling = .scaleProportionallyDown
-        addSubview(symbolView)
-        NSLayoutConstraint.activate([
-            symbolView.centerXAnchor.constraint(equalTo: centerXAnchor),
-            symbolView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            symbolView.widthAnchor.constraint(equalToConstant: 8),
-            symbolView.heightAnchor.constraint(equalToConstant: 10)
-        ])
+    override func drawDivider(in rect: NSRect) {
+        NSColor.white.setFill()
+        rect.fill()
     }
 }
 
 extension MainWindowController: NSSplitViewDelegate {
     func splitViewDidResizeSubviews(_ notification: Notification) {
-        layoutDividerButtons()
+        layoutNavigationControls()
     }
 }

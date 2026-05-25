@@ -2,11 +2,16 @@ import AppKit
 import WebKit
 import MdreviewCore
 
+enum ReaderLayout: String {
+    case centered
+    case withOutline
+}
+
 @MainActor
 final class RendererViewController: NSViewController, WKScriptMessageHandler, WKNavigationDelegate {
     private let webView: WKWebView
     private var isRendererLoaded = false
-    private var pendingScript: String?
+    private var pendingScripts = [String]()
     var onOutlineChanged: (([NativeOutlineItem]) -> Void)?
 
     init(resourceHandler: ResourceSchemeHandler) {
@@ -33,11 +38,23 @@ final class RendererViewController: NSViewController, WKScriptMessageHandler, WK
         webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
     }
 
-    func render(path: String, name: String, content: String, scrollPosition: Double?) {
-        let payload: [String: Any] = ["type": "renderDocument", "path": path, "name": name, "content": content, "scrollPosition": scrollPosition ?? 0]
+    func render(path: String, name: String, content: String, scrollPosition: Double?, readerLayout: ReaderLayout) {
+        let payload: [String: Any] = [
+            "type": "renderDocument",
+            "path": path,
+            "name": name,
+            "content": content,
+            "scrollPosition": scrollPosition ?? 0,
+            "readerLayout": readerLayout.rawValue
+        ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let json = String(data: data, encoding: .utf8) else { return }
         evaluateOrQueue("window.__mdreviewPendingDocument = \(json); window.__mdreviewRenderDocument && window.__mdreviewRenderDocument(window.__mdreviewPendingDocument);")
+    }
+
+    func setReaderLayout(_ readerLayout: ReaderLayout) {
+        let value = readerLayout.rawValue
+        evaluateOrQueue("window.__mdreviewPendingReaderLayout = '\(value)'; window.__mdreviewSetReaderLayout && window.__mdreviewSetReaderLayout(window.__mdreviewPendingReaderLayout);")
     }
 
     func scrollToHeading(id: String) {
@@ -47,7 +64,7 @@ final class RendererViewController: NSViewController, WKScriptMessageHandler, WK
 
     private func evaluateOrQueue(_ script: String) {
         guard isRendererLoaded else {
-            pendingScript = script
+            pendingScripts.append(script)
             return
         }
         webView.evaluateJavaScript(script)
@@ -55,9 +72,10 @@ final class RendererViewController: NSViewController, WKScriptMessageHandler, WK
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         isRendererLoaded = true
-        if let pendingScript {
-            self.pendingScript = nil
-            webView.evaluateJavaScript(pendingScript)
+        let scripts = pendingScripts
+        pendingScripts.removeAll()
+        for script in scripts {
+            webView.evaluateJavaScript(script)
         }
     }
 
