@@ -3,6 +3,11 @@ import MdreviewCore
 
 @MainActor
 final class SidebarController {
+    private enum TreeMetrics {
+        static let indentUnit: CGFloat = 14
+        static let maximumIndent: CGFloat = 84
+    }
+
     let filesView: NSScrollView = SidebarScrollView()
     let outlineView: NSScrollView = SidebarScrollView()
     let fileEdgeTriggerView = FileEdgeTriggerView()
@@ -17,6 +22,10 @@ final class SidebarController {
     private let outlineStack = SidebarStackView()
     private var outlineItems = [NativeOutlineItem]()
     private var activeHeadingID: String?
+    private var expandedFileDirectoryPaths = Set<String>()
+    private var lastFileTree = [MarkdownNode]()
+    private var lastActiveFilePath: String?
+    private var knownFileDirectoryPaths = Set<String>()
     var onSelectFile: ((String) -> Void)?
     var onSelectHeading: ((String) -> Void)?
 
@@ -52,11 +61,25 @@ final class SidebarController {
     }
 
     func renderFiles(nodes: [MarkdownNode], activePath: String?) {
+        let nextDirectoryPaths = directoryPaths(in: nodes)
+        if nextDirectoryPaths != knownFileDirectoryPaths {
+            expandedFileDirectoryPaths.formIntersection(nextDirectoryPaths)
+            knownFileDirectoryPaths = nextDirectoryPaths
+        }
+        if activePath != lastActiveFilePath {
+            expandedFileDirectoryPaths.formUnion(ancestorDirectoryPaths(for: activePath))
+        }
+        lastFileTree = nodes
+        lastActiveFilePath = activePath
+        reloadFileRows()
+    }
+
+    private func reloadFileRows() {
         clear(filesStack)
-        if nodes.isEmpty {
+        if lastFileTree.isEmpty {
             filesStack.addArrangedSubview(sidebarLabel("没有 Markdown 文件"))
         } else {
-            addFiles(nodes, depth: 0, activePath: activePath)
+            addFiles(lastFileTree, depth: 0, activePath: lastActiveFilePath)
         }
         filesView.needsLayout = true
     }
@@ -64,9 +87,19 @@ final class SidebarController {
     private func addFiles(_ nodes: [MarkdownNode], depth: Int, activePath: String?) {
         for node in nodes {
             if node.type == .directory {
-                let label = sidebarLabel(node.name, identifier: "directory:\(node.path)", depth: depth)
-                filesStack.addArrangedSubview(label)
-                addFiles(node.children, depth: depth + 1, activePath: activePath)
+                let isExpanded = expandedFileDirectoryPaths.contains(node.path)
+                let row = SidebarDirectoryRowButton(
+                    title: node.name,
+                    identifier: "directory:\(node.path)",
+                    depth: depth,
+                    isExpanded: isExpanded,
+                    target: self,
+                    action: #selector(toggleDirectory(_:))
+                )
+                filesStack.addArrangedSubview(row)
+                if isExpanded {
+                    addFiles(node.children, depth: depth + 1, activePath: activePath)
+                }
             } else {
                 let row = SidebarRowButton(
                     title: node.name,
@@ -160,6 +193,19 @@ final class SidebarController {
         onSelectFile?(path)
     }
 
+    @objc private func toggleDirectory(_ sender: SidebarDirectoryRowButton) {
+        guard let rawIdentifier = sender.identifier?.rawValue,
+              rawIdentifier.hasPrefix("directory:")
+        else { return }
+        let path = String(rawIdentifier.dropFirst("directory:".count))
+        if expandedFileDirectoryPaths.contains(path) {
+            expandedFileDirectoryPaths.remove(path)
+        } else {
+            expandedFileDirectoryPaths.insert(path)
+        }
+        reloadFileRows()
+    }
+
     @objc private func selectHeading(_ sender: SidebarRowButton) {
         guard let id = sender.identifier?.rawValue else { return }
         activeHeadingID = id
@@ -171,15 +217,21 @@ final class SidebarController {
         let label = NSTextField(labelWithString: title)
         label.identifier = identifier.map { NSUserInterfaceItemIdentifier($0) }
         label.tag = depth
+        label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = 1
+        label.toolTip = title
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let visualIndent = min(CGFloat(depth) * TreeMetrics.indentUnit, TreeMetrics.maximumIndent)
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .left
-        paragraphStyle.lineBreakMode = .byTruncatingMiddle
-        paragraphStyle.firstLineHeadIndent = CGFloat(depth * 14)
-        paragraphStyle.headIndent = CGFloat(depth * 14)
+        paragraphStyle.lineBreakMode = .byTruncatingTail
+        paragraphStyle.firstLineHeadIndent = visualIndent
+        paragraphStyle.headIndent = visualIndent
         label.attributedStringValue = NSAttributedString(
             string: title,
             attributes: [
-                .font: NSFont.systemFont(ofSize: 12),
+                .font: NSFont.systemFont(ofSize: 13),
                 .foregroundColor: NSColor.tertiaryLabelColor,
                 .paragraphStyle: paragraphStyle
             ]
@@ -192,6 +244,22 @@ final class SidebarController {
             stack.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
+    }
+
+    private func directoryPaths(in nodes: [MarkdownNode]) -> Set<String> {
+        var paths = Set<String>()
+        for node in nodes where node.type == .directory {
+            paths.insert(node.path)
+            paths.formUnion(directoryPaths(in: node.children))
+        }
+        return paths
+    }
+
+    private func ancestorDirectoryPaths(for activePath: String?) -> Set<String> {
+        guard let activePath else { return [] }
+        let parts = activePath.split(separator: "/").map(String.init)
+        guard parts.count > 1 else { return [] }
+        return Set((1..<parts.count).map { parts.prefix($0).joined(separator: "/") })
     }
 }
 
@@ -210,7 +278,7 @@ private final class SidebarScrollView: NSScrollView {
         stack.frame = NSRect(
             x: 0,
             y: 0,
-            width: max(contentView.bounds.width, fittingSize.width),
+            width: contentView.bounds.width,
             height: max(contentView.bounds.height, fittingSize.height)
         )
         stack.layoutSubtreeIfNeeded()

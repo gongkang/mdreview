@@ -53,6 +53,12 @@ export async function inlineRendererHtml(html, readAsset) {
     .replace(styleMatch[0], () => `<style>\n${style}\n</style>`);
 }
 
+export async function copyBundleIcon({ nativeDir, resourcesDir }) {
+  const iconSourcePath = path.join(nativeDir, "AppIcon.icns");
+  await assertExists(iconSourcePath, "缺少 native/AppIcon.icns");
+  await cp(iconSourcePath, path.join(resourcesDir, "AppIcon.icns"));
+}
+
 export async function packageMacosApp({ root = path.resolve(path.dirname(scriptPath), "..") } = {}) {
   const nativeDir = path.join(root, "native");
   const appDir = path.join(nativeDir, "dist", "mdreview.app");
@@ -74,6 +80,7 @@ export async function packageMacosApp({ root = path.resolve(path.dirname(scriptP
   await mkdir(resourcesDir, { recursive: true });
 
   await cp(infoPlistPath, path.join(contentsDir, "Info.plist"));
+  await copyBundleIcon({ nativeDir, resourcesDir });
   await writeFile(path.join(contentsDir, "PkgInfo"), "APPL????");
   await cp(executableSource, path.join(macOSDir, "mdreview-app"));
   await chmod(path.join(macOSDir, "mdreview-app"), 0o755);

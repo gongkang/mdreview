@@ -8,6 +8,8 @@
   <string>mdreview</string>
   <key>CFBundleExecutable</key>
   <string>mdreview-app</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundleIdentifier</key>
   <string>dev.mdreview.app</string>
   <key>CFBundleInfoDictionaryVersion</key>

@@ -17,4 +17,19 @@ describe("native reader stylesheet", () => {
     expect(css).toContain("margin-right: auto");
     expect(css).toContain("max-width: 1080px");
   });
+
+  it("uses comfortable native reader type sizes", () => {
+    expect(css).toMatch(/\.native-reader \.markdown-body\s*{[^}]*font-size:\s*16px/ms);
+    expect(css).toMatch(/\.native-reader \.markdown-body h1\s*{[^}]*font-size:\s*38px/ms);
+    expect(css).toMatch(/\.native-reader \.markdown-body h2\s*{[^}]*font-size:\s*27px/ms);
+    expect(css).toMatch(/\.native-reader \.markdown-body h3\s*{[^}]*font-size:\s*21px/ms);
+    expect(css).toMatch(/\.native-reader \.markdown-body pre code\s*{[^}]*font-size:\s*13px/ms);
+  });
+
+  it("styles Markdown tables with visible cells", () => {
+    expect(css).toContain(".native-reader .markdown-body th");
+    expect(css).toContain(".native-reader .markdown-body td");
+    expect(css).toContain("border: 1px solid #d8dee4");
+    expect(css).toContain("background: #f6f8fa");
+  });
 });

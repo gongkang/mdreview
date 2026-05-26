@@ -11,13 +11,32 @@ public struct ResourceAuthorizer {
         if resource.contains("://") {
             throw PathValidationError.unsupportedPath
         }
-        let base = document.deletingLastPathComponent()
-        let candidate = base.appendingPathComponent(resource).resolvingSymlinksInPath().standardizedFileURL
         let realRoot = root.resolvingSymlinksInPath().standardizedFileURL
-        let rootPrefix = realRoot.path.hasSuffix("/") ? realRoot.path : realRoot.path + "/"
-        guard candidate.path == realRoot.path || candidate.path.hasPrefix(rootPrefix) else {
+        let candidate: URL
+        if resource.hasPrefix("/") {
+            let absoluteCandidate = URL(fileURLWithPath: resource).resolvingSymlinksInPath().standardizedFileURL
+            if isInside(absoluteCandidate, root: realRoot) {
+                return absoluteCandidate
+            }
+            if FileManager.default.fileExists(atPath: absoluteCandidate.path) {
+                throw PathValidationError.pathEscapesRoot
+            }
+            candidate = realRoot
+                .appendingPathComponent(String(resource.drop(while: { $0 == "/" })))
+                .resolvingSymlinksInPath()
+                .standardizedFileURL
+        } else {
+            let base = document.deletingLastPathComponent()
+            candidate = base.appendingPathComponent(resource).resolvingSymlinksInPath().standardizedFileURL
+        }
+        guard isInside(candidate, root: realRoot) else {
             throw PathValidationError.pathEscapesRoot
         }
         return candidate
+    }
+
+    private func isInside(_ candidate: URL, root realRoot: URL) -> Bool {
+        let rootPrefix = realRoot.path.hasSuffix("/") ? realRoot.path : realRoot.path + "/"
+        return candidate.path == realRoot.path || candidate.path.hasPrefix(rootPrefix)
     }
 }

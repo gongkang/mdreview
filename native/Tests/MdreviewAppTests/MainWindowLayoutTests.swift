@@ -70,6 +70,39 @@ final class MainWindowLayoutTests: XCTestCase {
         XCTAssertEqual(usageRow.depth, 1)
     }
 
+    func testSidebarNavigationRowsUseReadableFontSize() throws {
+        let fileRow = SidebarRowButton(
+            title: "README.md",
+            identifier: "README.md",
+            depth: 0,
+            isActive: false,
+            kind: .file,
+            target: nil,
+            action: #selector(NSButton.performClick(_:))
+        )
+        let outlineRow = SidebarRowButton(
+            title: "Overview",
+            identifier: "overview",
+            depth: 0,
+            isActive: false,
+            kind: .outline,
+            target: nil,
+            action: #selector(NSButton.performClick(_:))
+        )
+        let directoryRow = SidebarDirectoryRowButton(
+            title: "docs",
+            identifier: "directory:docs",
+            depth: 0,
+            isExpanded: true,
+            target: nil,
+            action: #selector(NSButton.performClick(_:))
+        )
+
+        XCTAssertEqual(try fontSize(of: fileRow), 14)
+        XCTAssertEqual(try fontSize(of: outlineRow), 14)
+        XCTAssertEqual(try fontSize(of: directoryRow), 14)
+    }
+
     func testOutlineSelectionAppliesActiveStateAndRerenderClearsIt() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("mdreview-reader-active-\(UUID().uuidString).md")
         try "# Title\n\n## Usage\n".write(to: file, atomically: true, encoding: .utf8)
@@ -206,11 +239,278 @@ final class MainWindowLayoutTests: XCTestCase {
         XCTAssertTrue(fileRow.isActive)
         XCTAssertEqual(fileRow.accessibilityLabel(), "Intro.md")
 
-        let advancedLabel = try XCTUnwrap(findSubviews(ofType: NSTextField.self, in: controller.window?.contentView).first {
+        let advancedLabel = try XCTUnwrap(findSubviews(ofType: NSButton.self, in: controller.window?.contentView).first {
             $0.identifier?.rawValue == "directory:guide/advanced"
         })
-        XCTAssertEqual(advancedLabel.stringValue, "advanced")
+        XCTAssertEqual(advancedLabel.accessibilityLabel(), "advanced")
         XCTAssertEqual(advancedLabel.tag, 1)
+    }
+
+    func testFileTreeDefaultsToCurrentBranchAndCollapsesOtherDirectories() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-collapsed-files")
+        let activePath = "weekly/current/1126.md"
+        let fileTree = [
+            MarkdownNode(
+                type: .directory,
+                name: "weekly",
+                path: "weekly",
+                children: [
+                    MarkdownNode(
+                        type: .directory,
+                        name: "current",
+                        path: "weekly/current",
+                        children: [
+                            MarkdownNode(type: .file, name: "1126.md", path: activePath, children: [])
+                        ]
+                    ),
+                    MarkdownNode(
+                        type: .directory,
+                        name: "archive",
+                        path: "weekly/archive",
+                        children: [
+                            MarkdownNode(type: .file, name: "0105.md", path: "weekly/archive/0105.md", children: [])
+                        ]
+                    )
+                ]
+            )
+        ]
+        let tab = DocumentTab(url: root.appendingPathComponent(activePath))
+
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: fileTree,
+                tabs: [tab],
+                activeTabID: tab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.pinFileDirectoryForTesting()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let directoryButtons = findSubviews(ofType: NSButton.self, in: controller.window?.contentView)
+        let weekly = try XCTUnwrap(directoryButtons.first { $0.identifier?.rawValue == "directory:weekly" })
+        let current = try XCTUnwrap(directoryButtons.first { $0.identifier?.rawValue == "directory:weekly/current" })
+        let archive = try XCTUnwrap(directoryButtons.first { $0.identifier?.rawValue == "directory:weekly/archive" })
+
+        XCTAssertEqual(weekly.accessibilityLabel(), "weekly")
+        XCTAssertEqual(current.accessibilityLabel(), "current")
+        XCTAssertEqual(archive.accessibilityLabel(), "archive")
+        XCTAssertNotNil(findSubviews(ofType: SidebarRowButton.self, in: controller.window?.contentView).first {
+            $0.identifier?.rawValue == activePath
+        })
+        XCTAssertNil(findSubviews(ofType: SidebarRowButton.self, in: controller.window?.contentView).first {
+            $0.identifier?.rawValue == "weekly/archive/0105.md"
+        })
+    }
+
+    func testDirectoryRowsToggleExpansion() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-toggle-files")
+        let activePath = "weekly/current/1126.md"
+        let archivedPath = "weekly/archive/0105.md"
+        let fileTree = [
+            MarkdownNode(
+                type: .directory,
+                name: "weekly",
+                path: "weekly",
+                children: [
+                    MarkdownNode(
+                        type: .directory,
+                        name: "current",
+                        path: "weekly/current",
+                        children: [MarkdownNode(type: .file, name: "1126.md", path: activePath, children: [])]
+                    ),
+                    MarkdownNode(
+                        type: .directory,
+                        name: "archive",
+                        path: "weekly/archive",
+                        children: [MarkdownNode(type: .file, name: "0105.md", path: archivedPath, children: [])]
+                    )
+                ]
+            )
+        ]
+        let tab = DocumentTab(url: root.appendingPathComponent(activePath))
+
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: fileTree,
+                tabs: [tab],
+                activeTabID: tab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.pinFileDirectoryForTesting()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertNil(findSubviews(ofType: SidebarRowButton.self, in: controller.window?.contentView).first {
+            $0.identifier?.rawValue == archivedPath
+        })
+
+        try XCTUnwrap(findSubviews(ofType: NSButton.self, in: controller.window?.contentView).first {
+            $0.identifier?.rawValue == "directory:weekly/archive"
+        }).performClick(nil)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertNotNil(findSubviews(ofType: SidebarRowButton.self, in: controller.window?.contentView).first {
+            $0.identifier?.rawValue == archivedPath
+        })
+
+        try XCTUnwrap(findSubviews(ofType: NSButton.self, in: controller.window?.contentView).first {
+            $0.identifier?.rawValue == "directory:weekly/archive"
+        }).performClick(nil)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertNil(findSubviews(ofType: SidebarRowButton.self, in: controller.window?.contentView).first {
+            $0.identifier?.rawValue == archivedPath
+        })
+    }
+
+    func testDirectoryDisclosureSymbolDoesNotAccumulateAcrossAppearanceUpdates() {
+        let row = SidebarDirectoryRowButton(
+            title: "技术咨询",
+            identifier: "directory:technical",
+            depth: 0,
+            isExpanded: false,
+            target: nil,
+            action: #selector(NSButton.performClick(_:))
+        )
+
+        XCTAssertEqual(row.attributedTitle.string, "▸ 技术咨询")
+
+        row.isExpanded = true
+        XCTAssertEqual(row.attributedTitle.string, "▾ 技术咨询")
+
+        row.isExpanded = false
+        XCTAssertEqual(row.attributedTitle.string, "▸ 技术咨询")
+
+        row.isExpanded = true
+        XCTAssertEqual(row.attributedTitle.string, "▾ 技术咨询")
+    }
+
+    func testFileTreeKeepsUserExpansionWhenActiveFileChanges() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-remember-expanded-files")
+        let activePath = "weekly/current/1126.md"
+        let archivedPath = "weekly/archive/0105.md"
+        let fileTree = [
+            MarkdownNode(
+                type: .directory,
+                name: "weekly",
+                path: "weekly",
+                children: [
+                    MarkdownNode(
+                        type: .directory,
+                        name: "current",
+                        path: "weekly/current",
+                        children: [MarkdownNode(type: .file, name: "1126.md", path: activePath, children: [])]
+                    ),
+                    MarkdownNode(
+                        type: .directory,
+                        name: "archive",
+                        path: "weekly/archive",
+                        children: [MarkdownNode(type: .file, name: "0105.md", path: archivedPath, children: [])]
+                    )
+                ]
+            )
+        ]
+        let currentTab = DocumentTab(url: root.appendingPathComponent(activePath))
+        let otherTab = DocumentTab(url: root.appendingPathComponent("other.md"))
+
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: fileTree,
+                tabs: [currentTab, otherTab],
+                activeTabID: currentTab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.pinFileDirectoryForTesting()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        try XCTUnwrap(findSubviews(ofType: NSButton.self, in: controller.window?.contentView).first {
+            $0.identifier?.rawValue == "directory:weekly/archive"
+        }).performClick(nil)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: fileTree,
+                tabs: [currentTab, otherTab],
+                activeTabID: otherTab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertNotNil(findSubviews(ofType: SidebarRowButton.self, in: controller.window?.contentView).first {
+            $0.identifier?.rawValue == archivedPath
+        })
+    }
+
+    func testDeepFileTreeUsesBoundedReadableIndentation() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-deep-files")
+        let directoryNames = (0..<12).map { "folder-level-\($0)-with-readable-name" }
+        let fileName = "final-readable-file-name.md"
+        let filePath = (directoryNames + [fileName]).joined(separator: "/")
+        let deepestDirectoryPath = directoryNames.joined(separator: "/")
+        var node = MarkdownNode(type: .file, name: fileName, path: filePath, children: [])
+        for index in stride(from: directoryNames.count - 1, through: 0, by: -1) {
+            let directoryPath = directoryNames[0...index].joined(separator: "/")
+            node = MarkdownNode(
+                type: .directory,
+                name: directoryNames[index],
+                path: directoryPath,
+                children: [node]
+            )
+        }
+
+        let tab = DocumentTab(url: root.appendingPathComponent(filePath))
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: [node],
+                tabs: [tab],
+                activeTabID: tab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.pinFileDirectoryForTesting()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let fileRow = try XCTUnwrap(findSubviews(ofType: SidebarRowButton.self, in: controller.window?.contentView).first {
+            $0.identifier?.rawValue == filePath
+        })
+        let fileStyle = try XCTUnwrap(fileRow.attributedTitle.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
+        XCTAssertEqual(fileRow.depth, directoryNames.count)
+        XCTAssertEqual(fileStyle.lineBreakMode, .byTruncatingTail)
+        XCTAssertLessThanOrEqual(fileStyle.firstLineHeadIndent, 84)
+
+        let deepestDirectoryLabel = try XCTUnwrap(findSubviews(ofType: NSButton.self, in: controller.window?.contentView).first {
+            $0.identifier?.rawValue == "directory:\(deepestDirectoryPath)"
+        })
+        let directoryStyle = try XCTUnwrap(deepestDirectoryLabel.attributedTitle.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
+        XCTAssertEqual(deepestDirectoryLabel.accessibilityLabel(), directoryNames.last)
+        XCTAssertEqual(deepestDirectoryLabel.tag, directoryNames.count - 1)
+        XCTAssertEqual(directoryStyle.lineBreakMode, .byTruncatingTail)
+        XCTAssertLessThanOrEqual(directoryStyle.firstLineHeadIndent, 84)
     }
 
     func testDocumentTabsUseLowChromeTextButtons() {
@@ -494,6 +794,64 @@ final class MainWindowLayoutTests: XCTestCase {
         XCTAssertLessThan(color.alphaComponent, 0.35)
     }
 
+    func testPinnedFileDirectoryKeepsLongFileNamesFromExpandingListWidth() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-long-file-name")
+        let longName = "2026-05-24-mdreview-hover-drawer-outline-navigation-and-split-layout-regression-plan-with-extra-long-title.md"
+        let tab = DocumentTab(url: root.appendingPathComponent(longName))
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: [MarkdownNode(type: .file, name: longName, path: longName, children: [])],
+                tabs: [tab],
+                activeTabID: tab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.pinFileDirectoryForTesting()
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        splitView.setPosition(240, ofDividerAt: 0)
+        splitView.layoutSubtreeIfNeeded()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let filesPane = splitView.subviews[0]
+        let filesScrollView = try XCTUnwrap(findSubview(ofType: NSScrollView.self, in: filesPane))
+        let documentWidth = try XCTUnwrap(filesScrollView.documentView?.frame.width)
+        let clipWidth = filesScrollView.contentView.bounds.width
+
+        XCTAssertLessThanOrEqual(documentWidth, clipWidth + 1)
+    }
+
+    func testSidebarListsKeepLeadingAlignmentWhenWidthIsClamped() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-leading-sidebar")
+        let tab = DocumentTab(url: root.appendingPathComponent("README.md"))
+        controller.apply(
+            windowModel: WindowModel(
+                workspaceRoot: root,
+                fileTree: [MarkdownNode(type: .file, name: "README.md", path: "README.md", children: [])],
+                tabs: [tab],
+                activeTabID: tab.id,
+                layoutMode: .filesOutlineAndDocument
+            )
+        )
+        controller.pinFileDirectoryForTesting()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        let filesStack = try XCTUnwrap(findSubview(ofType: NSScrollView.self, in: splitView.subviews[0])?.documentView as? NSStackView)
+        let outlineStack = try XCTUnwrap(findSubview(ofType: NSScrollView.self, in: splitView.subviews[1])?.documentView as? NSStackView)
+
+        XCTAssertEqual(filesStack.alignment, .leading)
+        XCTAssertEqual(outlineStack.alignment, .leading)
+    }
+
     func testPinnedFileDirectoryStaysPinnedWhenSelectingAnotherFile() throws {
         let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
         defer { controller.window?.close() }
@@ -538,6 +896,126 @@ final class MainWindowLayoutTests: XCTestCase {
         XCTAssertEqual(splitView.subviews[0].frame.width, 330, accuracy: 4)
         XCTAssertNotNil(visibleButton(label: "取消固定文件列表", in: controller.window?.contentView))
         XCTAssertNil(visibleButton(label: "打开文件列表", in: controller.window?.contentView))
+    }
+
+    func testPinnedFileDirectoryWidthDoesNotGrowWhenSelectingFilesFromDirectoryRows() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1200, height: 800))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-pin-selection-growth")
+        let readme = DocumentTab(url: root.appendingPathComponent("README.md"))
+        let implementation = DocumentTab(url: root.appendingPathComponent("2026-05-24-mdreview-hover-drawer-outline-nav-design.md"))
+        let reader = DocumentTab(url: root.appendingPathComponent("2026-05-22-mdreview-native-app-design.md"))
+        let fileTree = [
+            MarkdownNode(type: .file, name: "README.md", path: "README.md", children: []),
+            MarkdownNode(
+                type: .file,
+                name: "2026-05-24-mdreview-hover-drawer-outline-nav-design.md",
+                path: "2026-05-24-mdreview-hover-drawer-outline-nav-design.md",
+                children: []
+            ),
+            MarkdownNode(
+                type: .file,
+                name: "2026-05-22-mdreview-native-app-design.md",
+                path: "2026-05-22-mdreview-native-app-design.md",
+                children: []
+            )
+        ]
+        var model = WindowModel(
+            workspaceRoot: root,
+            fileTree: fileTree,
+            tabs: [readme],
+            activeTabID: readme.id,
+            layoutMode: .filesOutlineAndDocument
+        )
+        controller.onOpenWorkspaceFile = { url in
+            if let existing = model.tabs.first(where: { $0.url.path == url.path }) {
+                model.activeTabID = existing.id
+            } else {
+                let tab: DocumentTab
+                if url.lastPathComponent == implementation.title {
+                    tab = implementation
+                } else if url.lastPathComponent == reader.title {
+                    tab = reader
+                } else {
+                    tab = DocumentTab(url: url)
+                }
+                model.tabs.append(tab)
+                model.activeTabID = tab.id
+            }
+            controller.apply(windowModel: model)
+        }
+
+        controller.apply(windowModel: model)
+        controller.pinFileDirectoryForTesting()
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        splitView.setPosition(300, ofDividerAt: 0)
+        splitView.layoutSubtreeIfNeeded()
+        let originalWidth = splitView.subviews[0].frame.width
+
+        for identifier in [
+            "2026-05-24-mdreview-hover-drawer-outline-nav-design.md",
+            "2026-05-22-mdreview-native-app-design.md",
+            "README.md",
+            "2026-05-24-mdreview-hover-drawer-outline-nav-design.md"
+        ] {
+            let row = try XCTUnwrap(findSubviews(ofType: SidebarRowButton.self, in: controller.window?.contentView).first {
+                $0.identifier?.rawValue == identifier
+            })
+            row.performClick(nil)
+            controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+            XCTAssertEqual(splitView.subviews[0].frame.width, originalWidth, accuracy: 3)
+        }
+    }
+
+    func testOpeningManyTabsDoesNotGrowPinnedDirectoryOrOutlineWidth() throws {
+        let controller = MainWindowController(visibleFrame: NSRect(x: 20, y: 30, width: 1600, height: 900))
+        defer { controller.window?.close() }
+        controller.showWindow(nil)
+
+        let root = URL(fileURLWithPath: "/tmp/mdreview-many-tabs")
+        let files = (0..<12).map { index in
+            "Long tab title \(index) with enough words to pressure the tab bar.md"
+        }
+        let fileTree = files.map { MarkdownNode(type: .file, name: $0, path: $0, children: []) }
+        let first = DocumentTab(url: root.appendingPathComponent(files[0]))
+        var tabs = [first]
+        var activeID = first.id
+
+        func applyModel() {
+            controller.apply(
+                windowModel: WindowModel(
+                    workspaceRoot: root,
+                    fileTree: fileTree,
+                    tabs: tabs,
+                    activeTabID: activeID,
+                    layoutMode: .filesOutlineAndDocument
+                )
+            )
+            controller.window?.contentView?.layoutSubtreeIfNeeded()
+        }
+
+        applyModel()
+        controller.pinFileDirectoryForTesting()
+        let splitView = try XCTUnwrap(findSubview(ofType: NSSplitView.self, in: controller.window?.contentView))
+        splitView.setPosition(300, ofDividerAt: 0)
+        splitView.setPosition(560, ofDividerAt: 1)
+        splitView.layoutSubtreeIfNeeded()
+
+        let originalFilesWidth = splitView.subviews[0].frame.width
+        let originalOutlineWidth = splitView.subviews[1].frame.width
+
+        for file in files.dropFirst() {
+            let tab = DocumentTab(url: root.appendingPathComponent(file))
+            tabs.append(tab)
+            activeID = tab.id
+            applyModel()
+
+            XCTAssertEqual(splitView.subviews[0].frame.width, originalFilesWidth, accuracy: 3)
+            XCTAssertEqual(splitView.subviews[1].frame.width, originalOutlineWidth, accuracy: 3)
+        }
     }
 
     func testFileMenuToggleDoesNotRevealFileDirectoryInSingleFileMode() throws {
@@ -857,6 +1335,11 @@ final class MainWindowLayoutTests: XCTestCase {
         findSubviews(ofType: NSButton.self, in: view).first {
             !$0.isHiddenOrHasHiddenAncestor && $0.accessibilityLabel() == label
         }
+    }
+
+    private func fontSize(of button: NSButton) throws -> CGFloat {
+        let font = try XCTUnwrap(button.attributedTitle.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
+        return font.pointSize
     }
 
     private func findSubview<T: NSView>(ofType type: T.Type, in view: NSView?) -> T? {

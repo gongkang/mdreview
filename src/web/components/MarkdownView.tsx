@@ -1,6 +1,6 @@
 import { isValidElement, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
@@ -9,6 +9,7 @@ import type { PluggableList } from "unified";
 import type { OutlineItem } from "./Outline";
 import { containsMath, containsMermaid } from "../markdown/detect";
 import { markdownSanitizeSchema } from "../markdown/sanitize";
+import { createImageResourcePlugin, type ResourceUrlResolver } from "../renderer/resources";
 import "highlight.js/styles/github.css";
 import "katex/dist/katex.min.css";
 
@@ -21,6 +22,7 @@ type MarkdownViewProps = {
   content: string;
   onOutline: (items: OutlineItem[]) => void;
   enableCodeCopy?: boolean;
+  resourceUrlResolver?: ResourceUrlResolver;
 };
 
 type HastNode = {
@@ -142,6 +144,11 @@ function copyWithFallback(value: string): Promise<void> {
   return Promise.resolve();
 }
 
+function markdownUrlTransform(value: string): string {
+  if (/^mdreview-resource:/i.test(value)) return value;
+  return defaultUrlTransform(value);
+}
+
 function CopyableCodeBlock({ className, code, children }: { className?: string; code: string; children: ReactNode }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const isCopied = copyState === "copied";
@@ -174,11 +181,15 @@ function CopyableCodeBlock({ className, code, children }: { className?: string; 
   );
 }
 
-export function MarkdownView({ content, onOutline, enableCodeCopy = false }: MarkdownViewProps) {
+export function MarkdownView({ content, onOutline, enableCodeCopy = false, resourceUrlResolver }: MarkdownViewProps) {
   const outline = useMemo(() => outlineFromMarkdown(content), [content]);
   const [dynamicPlugins, setDynamicPlugins] = useState<DynamicPlugins>({});
   const headingSlugs = new Map<string, number>();
   const headingID = (children: ReactNode) => uniqueSlug(textFromReactNode(children), headingSlugs);
+  const imageResourcePlugin = useMemo(
+    () => (resourceUrlResolver ? createImageResourcePlugin(resourceUrlResolver) : null),
+    [resourceUrlResolver]
+  );
 
   useEffect(() => {
     onOutline(outline);
@@ -199,14 +210,19 @@ export function MarkdownView({ content, onOutline, enableCodeCopy = false }: Mar
   }, [content]);
 
   const remarkPlugins: PluggableList = dynamicPlugins.remarkMath ? [remarkGfm, dynamicPlugins.remarkMath] : [remarkGfm];
-  const rehypePlugins: PluggableList = dynamicPlugins.rehypeKatex
-    ? [rehypeRaw, [rehypeSanitize, markdownSanitizeSchema], rehypeHighlight, dynamicPlugins.rehypeKatex]
-    : [rehypeRaw, [rehypeSanitize, markdownSanitizeSchema], rehypeHighlight];
+  const rehypePlugins: PluggableList = [
+    rehypeRaw,
+    ...(imageResourcePlugin ? [imageResourcePlugin] : []),
+    [rehypeSanitize, markdownSanitizeSchema],
+    rehypeHighlight,
+    ...(dynamicPlugins.rehypeKatex ? [dynamicPlugins.rehypeKatex] : [])
+  ];
 
   return (
     <ReactMarkdown
       remarkPlugins={remarkPlugins}
       rehypePlugins={rehypePlugins}
+      urlTransform={markdownUrlTransform}
       components={{
         h1: ({ children }) => <h1 id={headingID(children)}>{children}</h1>,
         h2: ({ children }) => <h2 id={headingID(children)}>{children}</h2>,

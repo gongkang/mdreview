@@ -79,6 +79,24 @@ final class RendererViewController: NSViewController, WKScriptMessageHandler, WK
         }
     }
 
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+    ) {
+        guard let url = navigationAction.request.url else {
+            decisionHandler(.allow)
+            return
+        }
+        switch RendererLinkNavigationPolicy.action(for: url) {
+        case .allow:
+            decisionHandler(.allow)
+        case .openExternally(let externalURL):
+            NSWorkspace.shared.open(externalURL)
+            decisionHandler(.cancel)
+        }
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any],
               let type = body["type"] as? String else { return }

@@ -44,4 +44,34 @@ final class FilesystemTests: XCTestCase {
         XCTAssertEqual(allowed.lastPathComponent, "logo.png")
         XCTAssertThrowsError(try ResourceAuthorizer(root: root).resolve(resource: "../secret.png", from: document))
     }
+
+    func testResourceAuthorizerAllowsAbsoluteImageInsideRoot() throws {
+        let root = try makeFixture().resolvingSymlinksInPath()
+        let image = root.appendingPathComponent("docs/diagram.png")
+        try "image".write(to: image, atomically: true, encoding: .utf8)
+        let document = root.appendingPathComponent("docs/guide.markdown")
+
+        let allowed = try ResourceAuthorizer(root: root).resolve(resource: image.path, from: document)
+        let outsideImage = root.deletingLastPathComponent().appendingPathComponent("secret.png")
+        try "secret".write(to: outsideImage, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(allowed.path, image.path)
+        XCTAssertThrowsError(
+            try ResourceAuthorizer(root: root).resolve(
+                resource: outsideImage.path,
+                from: document
+            )
+        )
+    }
+
+    func testResourceAuthorizerTreatsLeadingSlashAsRootRelativeFallback() throws {
+        let root = try makeFixture().resolvingSymlinksInPath()
+        let image = root.appendingPathComponent("docs/diagram.png")
+        try "image".write(to: image, atomically: true, encoding: .utf8)
+        let document = root.appendingPathComponent("readme.MD")
+
+        let allowed = try ResourceAuthorizer(root: root).resolve(resource: "/docs/diagram.png", from: document)
+
+        XCTAssertEqual(allowed.path, image.path)
+    }
 }

@@ -22,6 +22,8 @@ final class DocumentTabButton: NSButton {
         lineBreakMode = .byTruncatingMiddle
         focusRingType = .default
         setAccessibilityLabel(title)
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         updateAppearance()
     }
 

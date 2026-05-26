@@ -94,7 +94,7 @@ body {
   max-width: 980px;
   margin: 0 auto;
   padding: 56px clamp(32px, 6vw, 72px) 92px;
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.86;
   color: #30363d;
 }
@@ -120,19 +120,19 @@ body {
 
 .native-reader .markdown-body h1 {
   margin: 0 0 28px;
-  font-size: 34px;
+  font-size: 38px;
   font-weight: 700;
 }
 
 .native-reader .markdown-body h2 {
   margin: 42px 0 16px;
-  font-size: 24px;
+  font-size: 27px;
   font-weight: 650;
 }
 
 .native-reader .markdown-body h3 {
   margin: 32px 0 12px;
-  font-size: 19px;
+  font-size: 21px;
   font-weight: 650;
 }
 
@@ -211,7 +211,7 @@ body {
 .native-reader .markdown-body pre code {
   background: transparent;
   padding: 0;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .native-reader .markdown-body blockquote {
@@ -232,4 +232,26 @@ body {
   max-width: 100%;
   overflow-x: auto;
   border-collapse: collapse;
+  border-spacing: 0;
+}
+
+.native-reader .markdown-body th,
+.native-reader .markdown-body td {
+  border: 1px solid #d8dee4;
+  padding: 7px 11px;
+  vertical-align: top;
+}
+
+.native-reader .markdown-body th {
+  background: #f6f8fa;
+  color: #24292f;
+  font-weight: 650;
+}
+
+.native-reader .markdown-body tr {
+  background: #ffffff;
+}
+
+.native-reader .markdown-body tr:nth-child(2n) td {
+  background: #fbfcfd;
 }

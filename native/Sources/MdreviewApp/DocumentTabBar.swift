@@ -12,6 +12,8 @@ final class DocumentTabBar: NSObject {
         view.alignment = .centerY
         view.spacing = 0
         view.edgeInsets = NSEdgeInsets(top: 0, left: 8, bottom: 0, right: 8)
+        view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     }
 
     func render(tabs: [DocumentTab], activeTabID: UUID?) {

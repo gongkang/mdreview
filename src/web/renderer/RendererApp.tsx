@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { MarkdownView } from "../components/MarkdownView";
 import type { OutlineItem } from "../components/Outline";
 import { createNativeBridge } from "./bridge";
-import { rewriteMarkdownResources } from "./resources";
+import { toMdreviewResourceUrl } from "./resources";
 
 export type RenderDocumentMessage = {
   type: "renderDocument";
@@ -53,7 +53,12 @@ export function RendererApp() {
   return (
     <main className={`native-reader ${readerLayout === "withOutline" ? "native-reader--with-outline" : ""}`}>
       <article className="markdown-body">
-        <MarkdownView content={rewriteMarkdownResources(document.content)} enableCodeCopy onOutline={onOutline} />
+        <MarkdownView
+          content={document.content}
+          enableCodeCopy
+          resourceUrlResolver={toMdreviewResourceUrl}
+          onOutline={onOutline}
+        />
       </article>
     </main>
   );

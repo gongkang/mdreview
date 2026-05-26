@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="mdreview app icon">
+  <defs>
+    <linearGradient id="background" x1="220" y1="150" x2="800" y2="850" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#edf2f7"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="310" y1="674" x2="714" y2="674" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0a66c2"/>
+      <stop offset="1" stop-color="#18b7a8"/>
+    </linearGradient>
+  </defs>
+  <rect id="icon-base" x="100" y="100" width="824" height="824" rx="184" fill="url(#background)"/>
+  <rect x="108" y="108" width="808" height="808" rx="176" fill="none" stroke="#d7dee8" stroke-width="8"/>
+  <path d="M662 250h58l92 92v256c0 36-29 65-65 65h-85V250Z" fill="#e6edf5"/>
+  <path d="M720 250v84c0 22 18 40 40 40h52" fill="#f9fbfd"/>
+  <text x="512" y="592" fill="#202833" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif" font-size="238" font-weight="800" text-anchor="middle">md</text>
+  <rect x="310" y="674" width="404" height="31" rx="15.5" fill="url(#accent)"/>
+  <rect x="365" y="733" width="294" height="18" rx="9" fill="#202833" opacity="0.16"/>
+</svg>
