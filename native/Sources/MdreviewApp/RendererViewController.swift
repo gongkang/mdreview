@@ -13,6 +13,7 @@ final class RendererViewController: NSViewController, WKScriptMessageHandler, WK
     private var isRendererLoaded = false
     private var pendingScripts = [String]()
     var onOutlineChanged: (([NativeOutlineItem]) -> Void)?
+    var onOpenDocument: ((URL, String?) -> Void)?
 
     init(resourceHandler: ResourceSchemeHandler) {
         let configuration = WKWebViewConfiguration()
@@ -100,6 +101,13 @@ final class RendererViewController: NSViewController, WKScriptMessageHandler, WK
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any],
               let type = body["type"] as? String else { return }
+        if type == "openDocument" {
+            guard let path = body["path"] as? String,
+                  !path.isEmpty else { return }
+            let hash = body["hash"] as? String
+            onOpenDocument?(URL(fileURLWithPath: path), hash?.isEmpty == true ? nil : hash)
+            return
+        }
         guard type == "outlineChanged",
               let rawItems = body["items"] as? [[String: Any]] else { return }
         let items = rawItems.compactMap { item -> NativeOutlineItem? in

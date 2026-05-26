@@ -134,6 +134,14 @@ final class MainWindowController: NSWindowController {
         renderer.onOutlineChanged = { [weak self] items in
             self?.sidebar.renderOutline(items)
         }
+        renderer.onOpenDocument = { [weak self] url, hash in
+            guard let self else { return }
+            self.onOpenWorkspaceFile?(url)
+            guard let hash else { return }
+            DispatchQueue.main.async { [weak self] in
+                self?.renderer.scrollToHeading(id: hash)
+            }
+        }
         tabBar.onSelectTab = { [weak self] tabID in
             self?.onSelectTab?(tabID)
         }

@@ -8,6 +8,7 @@ type HandlerMap = {
 
 export type NativeBridge = {
   outlineChanged: (items: OutlineItem[]) => void;
+  openDocument: (path: string, hash?: string) => void;
   scrollChanged: (path: string, scrollPosition: number) => void;
   renderError: (path: string, message: string, blockId?: string) => void;
 };
@@ -18,6 +19,7 @@ export function createNativeBridge(handlers: HandlerMap = window.webkit?.message
   }
   return {
     outlineChanged: (items) => post({ type: "outlineChanged", items }),
+    openDocument: (path, hash) => post({ type: "openDocument", path, ...(hash ? { hash } : {}) }),
     scrollChanged: (path, scrollPosition) => post({ type: "scrollChanged", path, scrollPosition }),
     renderError: (path, message, blockId) => post({ type: "renderError", path, message, blockId })
   };

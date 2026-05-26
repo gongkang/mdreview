@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { MarkdownView } from "../components/MarkdownView";
+import { MarkdownView, type DocumentLinkTarget } from "../components/MarkdownView";
 import type { OutlineItem } from "../components/Outline";
 import { createNativeBridge } from "./bridge";
 import { toMdreviewResourceUrl } from "./resources";
@@ -46,6 +46,10 @@ export function RendererApp() {
     bridge.outlineChanged(items);
   }, [bridge]);
 
+  const onDocumentLink = useCallback((target: DocumentLinkTarget) => {
+    bridge.openDocument(target.path, target.hash);
+  }, [bridge]);
+
   if (!document) {
     return <main className="native-reader renderer-empty">等待文档...</main>;
   }
@@ -55,7 +59,9 @@ export function RendererApp() {
       <article className="markdown-body">
         <MarkdownView
           content={document.content}
+          documentPath={document.path}
           enableCodeCopy
+          onDocumentLink={onDocumentLink}
           resourceUrlResolver={toMdreviewResourceUrl}
           onOutline={onOutline}
         />

@@ -3,7 +3,7 @@ import type { DocumentResponse, FileNode, SessionResponse } from "../shared/type
 import { ApiClient, readTokenFromLocation, subscribeToDocumentEvents } from "./api-client";
 import { ErrorView } from "./components/ErrorView";
 import { FileTree } from "./components/FileTree";
-import { MarkdownView } from "./components/MarkdownView";
+import { MarkdownView, type DocumentLinkTarget } from "./components/MarkdownView";
 import { Outline, type OutlineItem } from "./components/Outline";
 
 function firstMarkdownPath(nodes: FileNode[]): string | null {
@@ -46,6 +46,17 @@ export function App() {
     setDocument(await client.document(path));
   }
 
+  async function openDocumentLink(target: DocumentLinkTarget) {
+    if (!client || session?.mode !== "directory") return;
+    const nextDocument = await client.document(target.path);
+    setDocument(nextDocument);
+    if (target.hash) {
+      window.requestAnimationFrame(() => {
+        window.document.getElementById(target.hash ?? "")?.scrollIntoView({ block: "start" });
+      });
+    }
+  }
+
   useEffect(() => {
     if (!token || !client || session?.mode !== "file" || !document) return;
     return subscribeToDocumentEvents(token, () => {
@@ -67,7 +78,12 @@ export function App() {
       <section className="document-pane">
         <header className="document-header">{session.mode === "directory" ? session.rootName : document.name}</header>
         <article className="markdown-body">
-          <MarkdownView content={document.content} onOutline={setOutline} />
+          <MarkdownView
+            content={document.content}
+            documentPath={document.path}
+            onDocumentLink={session.mode === "directory" ? openDocumentLink : undefined}
+            onOutline={setOutline}
+          />
         </article>
       </section>
       <Outline items={outline} />

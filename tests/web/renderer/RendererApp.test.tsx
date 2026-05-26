@@ -1,8 +1,9 @@
-import { act, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { RendererApp } from "../../../src/web/renderer/RendererApp";
 
 afterEach(() => {
+  delete window.webkit;
   delete window.__mdreviewRenderDocument;
   delete window.__mdreviewSetReaderLayout;
   delete window.__mdreviewPendingDocument;
@@ -86,5 +87,26 @@ describe("RendererApp", () => {
     });
 
     expect(container.querySelector(".native-reader--with-outline")).not.toBeInTheDocument();
+  });
+
+  it("asks native code to open relative markdown links from the current document directory", async () => {
+    const postMessage = vi.fn();
+    window.webkit = { messageHandlers: { mdreview: { postMessage } } };
+    window.__mdreviewPendingDocument = {
+      type: "renderDocument",
+      path: "/Users/me/docs/README.md",
+      name: "README.md",
+      content: "[Guide](guide.md#install)"
+    };
+
+    render(<RendererApp />);
+
+    fireEvent.click(await screen.findByRole("link", { name: "Guide" }));
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "openDocument",
+      path: "/Users/me/docs/guide.md",
+      hash: "install"
+    });
   });
 });
