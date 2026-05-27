@@ -149,6 +149,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewMenu.addItem(menuItem(title: MenuText.toggleFiles, action: #selector(toggleFiles), keyEquivalent: "1"))
         viewMenu.addItem(menuItem(title: MenuText.toggleOutline, action: #selector(toggleOutline), keyEquivalent: "2"))
         viewMenu.addItem(menuItem(title: MenuText.reloadCurrentDocument, action: #selector(reloadDocument), keyEquivalent: "r"))
+        viewMenu.addItem(.separator())
+        viewMenu.addItem(menuItem(title: MenuText.zoomInPreview, action: #selector(zoomInPreview), keyEquivalent: "+"))
+        viewMenu.addItem(menuItem(title: MenuText.zoomOutPreview, action: #selector(zoomOutPreview), keyEquivalent: "-"))
+        viewMenu.addItem(menuItem(title: MenuText.resetPreviewZoom, action: #selector(resetPreviewZoom), keyEquivalent: "0"))
         viewItem.submenu = viewMenu
         main.addItem(viewItem)
 
@@ -210,6 +214,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func reloadDocument() {
         activeController()?.reloadDocument()
+    }
+
+    @objc private func zoomInPreview() {
+        activeController()?.zoomInPreview()
+    }
+
+    @objc private func zoomOutPreview() {
+        activeController()?.zoomOutPreview()
+    }
+
+    @objc private func resetPreviewZoom() {
+        activeController()?.resetPreviewZoom()
     }
 
     private func activeWindowIndex() -> Array<WindowModel>.Index? {

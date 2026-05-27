@@ -12,5 +12,8 @@ public enum MenuText {
     public static let toggleFiles = "显示/隐藏文件"
     public static let toggleOutline = "显示/隐藏大纲"
     public static let reloadCurrentDocument = "重新载入当前文档"
+    public static let zoomInPreview = "放大"
+    public static let zoomOutPreview = "缩小"
+    public static let resetPreviewZoom = "实际大小"
     public static let window = "窗口"
 }

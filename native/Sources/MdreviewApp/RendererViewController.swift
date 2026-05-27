@@ -15,6 +15,13 @@ final class RendererViewController: NSViewController, WKScriptMessageHandler, WK
     var onOutlineChanged: (([NativeOutlineItem]) -> Void)?
     var onOpenDocument: ((URL, String?) -> Void)?
 
+    private enum PreviewZoom {
+        static let minimum: CGFloat = 0.5
+        static let maximum: CGFloat = 3
+        static let step: CGFloat = 0.1
+        static let actualSize: CGFloat = 1
+    }
+
     init(resourceHandler: ResourceSchemeHandler) {
         let configuration = WKWebViewConfiguration()
         configuration.setURLSchemeHandler(resourceHandler, forURLScheme: "mdreview-resource")
@@ -23,6 +30,7 @@ final class RendererViewController: NSViewController, WKScriptMessageHandler, WK
         self.webView = WKWebView(frame: .zero, configuration: configuration)
         super.init(nibName: nil, bundle: nil)
         webView.navigationDelegate = self
+        webView.allowsMagnification = true
         contentController.add(self, name: "mdreview")
     }
 
@@ -61,6 +69,23 @@ final class RendererViewController: NSViewController, WKScriptMessageHandler, WK
     func scrollToHeading(id: String) {
         let escaped = id.replacingOccurrences(of: "'", with: "\\'")
         evaluateOrQueue("document.getElementById('\(escaped)')?.scrollIntoView({ block: 'start' });")
+    }
+
+    func zoomIn() {
+        setPreviewZoom(webView.magnification + PreviewZoom.step)
+    }
+
+    func zoomOut() {
+        setPreviewZoom(webView.magnification - PreviewZoom.step)
+    }
+
+    func resetZoom() {
+        setPreviewZoom(PreviewZoom.actualSize)
+    }
+
+    private func setPreviewZoom(_ magnification: CGFloat) {
+        let clamped = min(max(magnification, PreviewZoom.minimum), PreviewZoom.maximum)
+        webView.setMagnification(clamped, centeredAt: NSPoint(x: webView.bounds.midX, y: webView.bounds.midY))
     }
 
     private func evaluateOrQueue(_ script: String) {

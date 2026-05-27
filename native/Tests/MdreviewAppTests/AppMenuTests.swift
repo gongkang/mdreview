@@ -33,4 +33,24 @@ final class AppMenuTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(filesItem.target as AnyObject?) === delegate)
         XCTAssertTrue(try XCTUnwrap(outlineItem.target as AnyObject?) === delegate)
     }
+
+    func testViewMenuContainsPreviewZoomActions() throws {
+        let delegate = AppDelegate()
+        let menu = delegate.buildMenu()
+        let viewMenu = try XCTUnwrap(menu.items.compactMap(\.submenu).first { $0.title == MenuText.view })
+
+        let zoomInItem = try XCTUnwrap(viewMenu.item(withTitle: MenuText.zoomInPreview))
+        let zoomOutItem = try XCTUnwrap(viewMenu.item(withTitle: MenuText.zoomOutPreview))
+        let resetZoomItem = try XCTUnwrap(viewMenu.item(withTitle: MenuText.resetPreviewZoom))
+
+        XCTAssertEqual(NSStringFromSelector(try XCTUnwrap(zoomInItem.action)), "zoomInPreview")
+        XCTAssertEqual(NSStringFromSelector(try XCTUnwrap(zoomOutItem.action)), "zoomOutPreview")
+        XCTAssertEqual(NSStringFromSelector(try XCTUnwrap(resetZoomItem.action)), "resetPreviewZoom")
+        XCTAssertEqual(zoomInItem.keyEquivalent, "+")
+        XCTAssertEqual(zoomOutItem.keyEquivalent, "-")
+        XCTAssertEqual(resetZoomItem.keyEquivalent, "0")
+        XCTAssertTrue(try XCTUnwrap(zoomInItem.target as AnyObject?) === delegate)
+        XCTAssertTrue(try XCTUnwrap(zoomOutItem.target as AnyObject?) === delegate)
+        XCTAssertTrue(try XCTUnwrap(resetZoomItem.target as AnyObject?) === delegate)
+    }
 }

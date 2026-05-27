@@ -7,7 +7,7 @@ final class SidebarRowButton: NSButton {
         case outline
     }
 
-    private static let outlineTextColor = NSColor(
+    static let navigationTextColor = NSColor(
         calibratedRed: 0.12,
         green: 0.14,
         blue: 0.17,
@@ -112,10 +112,7 @@ final class SidebarRowButton: NSButton {
         if isActive {
             return .labelColor
         }
-        if kind == .outline {
-            return Self.outlineTextColor
-        }
-        return .secondaryLabelColor
+        return Self.navigationTextColor
     }
 
     private var fontForRow: NSFont {
@@ -220,7 +217,7 @@ final class SidebarDirectoryRowButton: NSButton {
             string: "\(disclosureSymbol) \(displayTitle)",
             attributes: [
                 .font: NSFont.systemFont(ofSize: 14, weight: depth == 0 ? .medium : .regular),
-                .foregroundColor: NSColor.secondaryLabelColor,
+                .foregroundColor: SidebarRowButton.navigationTextColor,
                 .paragraphStyle: paragraphStyle
             ]
         )

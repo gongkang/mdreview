@@ -450,6 +450,18 @@ final class MainWindowController: NSWindowController {
         render(tab: active, workspaceRoot: windowModel.workspaceRoot)
     }
 
+    func zoomInPreview() {
+        renderer.zoomIn()
+    }
+
+    func zoomOutPreview() {
+        renderer.zoomOut()
+    }
+
+    func resetPreviewZoom() {
+        renderer.resetZoom()
+    }
+
     private func watch(activeTab: DocumentTab?, workspaceRoot: URL?) {
         activeWatcher?.stop()
         activeWatcher = nil

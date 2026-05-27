@@ -188,6 +188,38 @@ final class MainWindowLayoutTests: XCTestCase {
         XCTAssertLessThan(rgb.blueComponent, 0.25)
     }
 
+    func testFileDirectoryRowsUseOutlineTextColor() throws {
+        let outlineRow = SidebarRowButton(
+            title: "Overview",
+            identifier: "overview",
+            depth: 0,
+            isActive: false,
+            kind: .outline,
+            target: nil,
+            action: #selector(NSButton.performClick(_:))
+        )
+        let fileRow = SidebarRowButton(
+            title: "README.md",
+            identifier: "README.md",
+            depth: 0,
+            isActive: false,
+            kind: .file,
+            target: nil,
+            action: #selector(NSButton.performClick(_:))
+        )
+        let directoryRow = SidebarDirectoryRowButton(
+            title: "docs",
+            identifier: "directory:docs",
+            depth: 0,
+            isExpanded: true,
+            target: nil,
+            action: #selector(NSButton.performClick(_:))
+        )
+
+        XCTAssertEqual(try foregroundColorComponents(of: fileRow), try foregroundColorComponents(of: outlineRow))
+        XCTAssertEqual(try foregroundColorComponents(of: directoryRow), try foregroundColorComponents(of: outlineRow))
+    }
+
     func testDirectoryModeFilesUseTextRowsAndActiveFileState() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("mdreview-files-\(UUID().uuidString)", isDirectory: true)
         let nested = root.appendingPathComponent("guide/advanced", isDirectory: true)
@@ -1340,6 +1372,17 @@ final class MainWindowLayoutTests: XCTestCase {
     private func fontSize(of button: NSButton) throws -> CGFloat {
         let font = try XCTUnwrap(button.attributedTitle.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
         return font.pointSize
+    }
+
+    private func foregroundColorComponents(of button: NSButton) throws -> [CGFloat] {
+        let color = try XCTUnwrap(button.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor)
+        let rgb = try XCTUnwrap(color.usingColorSpace(.sRGB))
+        return [
+            round(rgb.redComponent * 1_000) / 1_000,
+            round(rgb.greenComponent * 1_000) / 1_000,
+            round(rgb.blueComponent * 1_000) / 1_000,
+            round(rgb.alphaComponent * 1_000) / 1_000
+        ]
     }
 
     private func findSubview<T: NSView>(ofType type: T.Type, in view: NSView?) -> T? {
