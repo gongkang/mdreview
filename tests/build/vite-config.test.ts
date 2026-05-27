@@ -7,4 +7,10 @@ describe("vite config", () => {
 
     expect(config).toContain('base: "./"');
   });
+
+  it("inlines dynamic imports so Mermaid can render from file:// inside the app bundle", () => {
+    const config = readFileSync("vite.config.ts", "utf8");
+
+    expect(config).toContain("inlineDynamicImports: true");
+  });
 });

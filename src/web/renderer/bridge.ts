@@ -1,4 +1,4 @@
-import type { OutlineItem } from "../components/Outline";
+import type { OutlineItem } from "../markdown/outline";
 
 type HandlerMap = {
   mdreview?: {

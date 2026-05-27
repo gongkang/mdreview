@@ -6,8 +6,8 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import type { PluggableList } from "unified";
-import type { OutlineItem } from "./Outline";
 import { containsMath, containsMermaid } from "../markdown/detect";
+import type { OutlineItem } from "../markdown/outline";
 import { markdownSanitizeSchema } from "../markdown/sanitize";
 import { createImageResourcePlugin, type ResourceUrlResolver } from "../renderer/resources";
 import "highlight.js/styles/github.css";
@@ -154,6 +154,12 @@ function copyWithFallback(value: string): Promise<void> {
 function markdownUrlTransform(value: string): string {
   if (/^mdreview-resource:/i.test(value)) return value;
   return defaultUrlTransform(value);
+}
+
+function isMermaidCodeNode(node: ReactNode): boolean {
+  if (Array.isArray(node)) return node.some(isMermaidCodeNode);
+  if (!isValidElement<{ className?: unknown }>(node)) return false;
+  return typeof node.props.className === "string" && /language-mermaid/i.test(node.props.className);
 }
 
 const markdownDocumentPattern = /\.(md|markdown|mdown|mkd|mkdn)$/i;
@@ -361,7 +367,7 @@ export function MarkdownView({
           );
         },
         pre({ children }) {
-          return enableCodeCopy ? <>{children}</> : <pre>{children}</pre>;
+          return enableCodeCopy || isMermaidCodeNode(children) ? <>{children}</> : <pre>{children}</pre>;
         },
         code({ className, children, node }) {
           const rawCode = textFromNode(node as HastNode);

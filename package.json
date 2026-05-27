@@ -18,15 +18,12 @@
     "test:native": "DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer} xcrun swift test --package-path native",
     "test:all": "npm run typecheck && npm test && npm run test:native",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "chokidar": "^4.0.0",
     "highlight.js": "^11.0.0",
     "katex": "^0.16.0",
     "mermaid": "^11.0.0",
-    "open": "^10.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.0.0",
@@ -38,7 +35,6 @@
     "remark-math": "^6.0.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.0.0",
     "@testing-library/jest-dom": "^6.0.0",
     "@testing-library/react": "^16.0.0",
     "@types/node": "^22.0.0",

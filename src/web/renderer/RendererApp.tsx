@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MarkdownView, type DocumentLinkTarget } from "../components/MarkdownView";
-import type { OutlineItem } from "../components/Outline";
+import type { OutlineItem } from "../markdown/outline";
 import { createNativeBridge } from "./bridge";
 import { toMdreviewResourceUrl } from "./resources";
 
